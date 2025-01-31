@@ -125,7 +125,7 @@ def reindex(root: str):
 def scopes(q: str = "", limit: int = 100) -> List[str]:
     """Search for scopes in the database"""
     try:
-        cursor = db_duckdb.execute("SELECT scope FROM scopes WHERE scope LIKE ? LIMIT ?", (f"%{q}%", limit)).fetchall()
+        cursor = db_duckdb.execute("SELECT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) LIMIT ?", (f"%{q}%", limit)).fetchall()
         return [row[0] for row in cursor]
     except:
         return []

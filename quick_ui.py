@@ -199,7 +199,7 @@ class SearchUI(QMainWindow):
                 pass
 
     def on_scope_search_changed(self):
-        self.scope_timer.start(1000)
+        self.scope_timer.start(200)
         self.save_timer.start(1000)
 
     def on_text_search_changed(self):
@@ -247,8 +247,8 @@ class SearchUI(QMainWindow):
             play_button.clicked.connect(
                 lambda checked, r=result: self.play_audio(r))
 
-            item_layout.addWidget(text_button)
             item_layout.addWidget(play_button)
+            item_layout.addWidget(text_button)
 
             self.results_list.addItem("")
             self.results_list.setItemWidget(

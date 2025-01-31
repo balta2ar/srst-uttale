@@ -114,16 +114,26 @@ class SearchUI(QMainWindow):
         self.text_search.textChanged.connect(self.on_text_search_changed)
         self.scope_suggestions.itemClicked.connect(self.on_scope_selected)
 
+        # Add event filters for keyboard shortcuts
+        self.scope_search.installEventFilter(self)
+        self.text_search.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == event.Type.KeyPress:
+            if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                if event.key() == Qt.Key.Key_K:
+                    self.text_search.setFocus()
+                    self.text_search.selectAll()
+                    return True
+                elif event.key() == Qt.Key.Key_M:
+                    self.scope_search.setFocus()
+                    self.scope_search.selectAll()
+                    return True
+        return super().eventFilter(obj, event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.close()
-        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            if event.key() == Qt.Key.Key_K:
-                self.text_search.setFocus()
-                self.text_search.selectAll()
-            elif event.key() == Qt.Key.Key_M:
-                self.scope_search.setFocus()
-                self.scope_search.selectAll()
         else:
             super().keyPressEvent(event)
 

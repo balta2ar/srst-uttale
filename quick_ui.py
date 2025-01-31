@@ -158,6 +158,7 @@ class SearchUI(QMainWindow):
         self.state_file = self.temp_dir / "search_state.json"
 
     def save_state(self):
+        screen = QApplication.screenAt(QCursor.pos())
         state = {
             'scope': self.scope_search.text(),
             'text': self.text_search.text(),
@@ -167,7 +168,7 @@ class SearchUI(QMainWindow):
                 'width': self.width(),
                 'height': self.height(),
             },
-            'screen': QApplication.screenAt(self.pos()).name(),
+            "screen": screen.name() if screen else None,
         }
         self.state_file.write_text(dumps(state))
 

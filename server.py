@@ -12,11 +12,26 @@ import duckdb
 import polars as pl
 import uvicorn
 import webvtt
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from tqdm import tqdm
 
 app = FastAPI()
 db_duckdb = None
+
+# Customize Uvicorn logging config to include timing
+log_config = uvicorn.config.LOGGING_CONFIG
+log_config["formatters"]["access"]["fmt"] = '%(asctime)s - %(client_addr)s - "%(request_line)s" %(status_code)s - %(process_time).3fs'
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    # Add processing time to response headers
+    response.headers["X-Process-Time"] = str(process_time)
+    # Modify the request scope to include timing in the log message
+    request.scope["process_time"] = process_time
+    return response
 
 def init_database():
     """Initialize the database and create tables"""
@@ -197,4 +212,4 @@ if __name__ == "__main__":
         iface, port = args.iface.split(":")
     except:
         exit(1)
-    uvicorn.run(app, host=iface, port=int(port))
+    uvicorn.run(app, host=iface, port=int(port), log_config=log_config)

@@ -60,8 +60,7 @@ def update_progress(total: int, counter, lock: mp.Lock, stop_event: threading.Ev
 
 def reindex(root: str):
     global db_duckdb
-    db_duckdb.execute("DROP TABLE IF EXISTS lines")
-    db_duckdb.execute("CREATE TABLE lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
+    db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
     try:
         fd = subprocess.run(['fd', '--type', 'f', '--extension', 'vtt', '--base-directory', root], capture_output=True, text=True, check=True)
         vtt_files = fd.stdout.splitlines()

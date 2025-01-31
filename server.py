@@ -18,6 +18,12 @@ from tqdm import tqdm
 app = FastAPI()
 db_duckdb = None
 
+def init_database():
+    """Initialize the database and create tables"""
+    global db_duckdb
+    db_duckdb = duckdb.connect("lines_duckdb.db")
+    db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
+
 def parse_time(t: str) -> float:
     h, m, s = t.split(":")
     s, ms = s.split(".")
@@ -59,8 +65,6 @@ def update_progress(total: int, counter, lock: mp.Lock, stop_event: threading.Ev
         pbar.refresh()
 
 def reindex(root: str):
-    global db_duckdb
-    db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
     try:
         fd = subprocess.run(["fd", "--type", "f", "--extension", "vtt", "--base-directory", root], capture_output=True, text=True, check=True)
         vtt_files = fd.stdout.splitlines()
@@ -191,7 +195,7 @@ if __name__ == "__main__":
     parser.add_argument("--iface", default="0.0.0.0:7010")
     parser.add_argument("--reindex", action="store_true", default=False)
     args = parser.parse_args()
-    db_duckdb = duckdb.connect("lines_duckdb.db")
+    init_database()
     if args.reindex:
         reindex(args.root)
     try:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from json import loads
+from json import dumps, loads
 from pathlib import Path
 from subprocess import DEVNULL, Popen
 from sys import argv, exit
@@ -95,6 +95,7 @@ class SearchUI(QMainWindow):
         self.setup_ui()
         self.setup_timers()
         self.setup_temporary_storage()
+        self.load_saved_state()
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -145,17 +146,40 @@ class SearchUI(QMainWindow):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.search_text)
 
+        self.save_timer = QTimer()
+        self.save_timer.setSingleShot(True)
+        self.save_timer.timeout.connect(self.save_state)
+
         self.current_player = None
 
     def setup_temporary_storage(self):
         self.temp_dir = Path(gettempdir()) / "uttale_audio"
         self.temp_dir.mkdir(exist_ok=True)
+        self.state_file = self.temp_dir / "search_state.json"
+
+    def save_state(self):
+        state = {
+            'scope': self.scope_search.text(),
+            'text': self.text_search.text()
+        }
+        self.state_file.write_text(dumps(state))
+
+    def load_saved_state(self):
+        if self.state_file.exists():
+            try:
+                state = loads(self.state_file.read_text())
+                self.scope_search.setText(state.get('scope', ''))
+                self.text_search.setText(state.get('text', ''))
+            except:
+                pass
 
     def on_scope_search_changed(self):
         self.scope_timer.start(1000)
+        self.save_timer.start(1000)
 
     def on_text_search_changed(self):
         self.search_timer.start(1000)
+        self.save_timer.start(1000)
 
     def search_scopes(self):
         query = self.scope_search.text()
@@ -236,6 +260,9 @@ class SearchUI(QMainWindow):
     def closeEvent(self, event):
         if self.current_player:
             self.current_player.terminate()
+
+        # Save state before closing
+        self.save_state()
 
         # Cleanup temp files
         for file in self.temp_dir.glob("audio_*.wav"):

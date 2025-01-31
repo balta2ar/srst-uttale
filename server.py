@@ -110,7 +110,7 @@ def reindex(root: str):
 def scopes(q: str = "", limit: int = 100) -> List[str]:
     """Search for scopes in the database"""
     try:
-        cursor = db_duckdb.execute("SELECT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) LIMIT ?", (f"%{q}%", limit)).fetchall()
+        cursor = db_duckdb.execute("SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?", (f"%{q}%", limit)).fetchall()
         return [row[0] for row in cursor]
     except:
         return []
@@ -120,8 +120,8 @@ def search(q: str, scope: str = "", limit: int = 100) -> List[Dict]:
     """Search for text in the database given a scope"""
     try:
         cursor = db_duckdb.execute(
-            "SELECT filename, start, end_time, text FROM lines WHERE filename LIKE ? AND text LIKE ? LIMIT ?",
-            (f"{scope}%", f"%{q}%", limit)).fetchall()
+            "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
+            (f"%{q}%", f"%{scope}%", limit)).fetchall()
     except:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
     return [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]

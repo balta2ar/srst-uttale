@@ -23,6 +23,7 @@ def init_database():
     global db_duckdb
     db_duckdb = duckdb.connect("lines_duckdb.db")
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
+    db_duckdb.execute("CREATE TABLE IF NOT EXISTS scopes (scope VARCHAR)")
 
 def parse_time(t: str) -> float:
     h, m, s = t.split(":")
@@ -98,24 +99,18 @@ def reindex(root: str):
     if all_rows:
         df = pl.DataFrame(all_rows, schema=["filename", "start", "end_time", "text"])
         db_duckdb.register("df", df)
+        db_duckdb.execute("DELETE FROM lines")
         db_duckdb.execute("INSERT INTO lines SELECT filename, start, end_time, text FROM df")
+        db_duckdb.execute("DELETE FROM scopes")
+        db_duckdb.execute("INSERT INTO scopes SELECT DISTINCT SPLIT_PART(filename, '/', 1) || '/' || SPLIT_PART(filename, '/', 2) AS scope FROM lines ORDER BY scope")
         db_duckdb.unregister("df")
     db_duckdb.commit()
-
-# @app.get("/uttale/Scopes")
-# def scopes(q: str = "") -> List[str]:
-#     try:
-#         r = subprocess.run(['fd', '--type', 'd', '--max-depth', '2', '--base-directory', args.root], capture_output=True, text=True, check=True)
-#         dirs = sorted([relpath(d, args.root) for d in r.stdout.splitlines()])
-#         return [d for d in dirs if q.lower() in d.lower()]
-#     except:
-#         return []
 
 @app.get("/uttale/Scopes")
 def scopes(q: str = "", limit: int = 100) -> List[str]:
     """Search for scopes in the database"""
     try:
-        cursor = db_duckdb.execute("SELECT DISTINCT SPLIT_PART(filename, '/', 1) || '/' || SPLIT_PART(filename, '/', 2) AS scope FROM lines WHERE scope LIKE ? ORDER BY scope DESC LIMIT ?", (f"%{q}%", limit)).fetchall()
+        cursor = db_duckdb.execute("SELECT scope FROM scopes WHERE scope LIKE ? LIMIT ?", (f"%{q}%", limit)).fetchall()
         return [row[0] for row in cursor]
     except:
         return []

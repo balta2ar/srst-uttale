@@ -1,16 +1,26 @@
-import argparse, subprocess, webvtt, uvicorn, duckdb, multiprocessing as mp, threading, time, os, tempfile
-from fastapi import FastAPI, HTTPException, Response, BackgroundTasks
-from typing import List, Dict
-from os.path import join, relpath, exists, splitext
-from tqdm import tqdm
+import argparse
+import multiprocessing as mp
+import os
+import subprocess
+import tempfile
+import threading
+import time
+from os.path import exists, join, relpath, splitext
+from typing import Dict, List
+
+import duckdb
 import polars as pl
+import uvicorn
+import webvtt
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from tqdm import tqdm
 
 app = FastAPI()
 db_duckdb = None
 
 def parse_time(t: str) -> float:
-    h, m, s = t.split(':')
-    s, ms = s.split('.')
+    h, m, s = t.split(":")
+    s, ms = s.split(".")
     return int(h)*3600 + int(m)*60 + float(s) + int(ms)/1000
 
 def process_vtt(vtt: str, root: str) -> List[tuple]:

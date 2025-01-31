@@ -62,7 +62,7 @@ def reindex(root: str):
     global db_duckdb
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
     try:
-        fd = subprocess.run(['fd', '--type', 'f', '--extension', 'vtt', '--base-directory', root], capture_output=True, text=True, check=True)
+        fd = subprocess.run(["fd", "--type", "f", "--extension", "vtt", "--base-directory", root], capture_output=True, text=True, check=True)
         vtt_files = fd.stdout.splitlines()
     except:
         vtt_files = []
@@ -71,7 +71,7 @@ def reindex(root: str):
         return
     manager = mp.Manager()
     return_dict = manager.dict()
-    counter = manager.Value('i',0)
+    counter = manager.Value("i",0)
     lock = manager.Lock()
     num_processes = min(mp.cpu_count(),8)
     chunk_size = (total_files + num_processes -1)//num_processes
@@ -109,6 +109,7 @@ def reindex(root: str):
 
 @app.get("/uttale/Scopes")
 def scopes(q: str = "", limit: int = 100) -> List[str]:
+    """Search for scopes in the database"""
     try:
         cursor = db_duckdb.execute("SELECT DISTINCT SPLIT_PART(filename, '/', 1) || '/' || SPLIT_PART(filename, '/', 2) AS scope FROM lines WHERE scope LIKE ? ORDER BY scope DESC LIMIT ?", (f"%{q}%", limit)).fetchall()
         return [row[0] for row in cursor]
@@ -117,6 +118,7 @@ def scopes(q: str = "", limit: int = 100) -> List[str]:
 
 @app.get("/uttale/Search")
 def search(q: str, scope: str = "", limit: int = 100) -> List[Dict]:
+    """Search for text in the database given a scope"""
     try:
         cursor = db_duckdb.execute(
             "SELECT filename, start, end_time, text FROM lines WHERE filename LIKE ? AND text LIKE ? LIMIT ?",
@@ -126,7 +128,7 @@ def search(q: str, scope: str = "", limit: int = 100) -> List[Dict]:
     return [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]
 
 def get_audio_segment(filename: str, start: str, end: str) -> bytes:
-    o = splitext(join(args.root, filename))[0] + '.ogg'
+    o = splitext(join(args.root, filename))[0] + ".ogg"
     if not exists(o):
         raise HTTPException(status_code=404, detail="File not found")
     try:
@@ -138,22 +140,23 @@ def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     if duration <=0:
         raise HTTPException(status_code=400, detail="End time must be greater than start time")
     try:
-        proc = subprocess.run(['ffmpeg', '-ss', str(start_sec), '-t', str(duration), '-i', o, '-f', 'ogg', 'pipe:1'], capture_output=True, check=True)
+        proc = subprocess.run(["ffmpeg", "-ss", str(start_sec), "-t", str(duration), "-i", o, "-f", "ogg", "pipe:1"], capture_output=True, check=True)
         return proc.stdout
     except:
         raise HTTPException(status_code=500, detail="Audio processing failed")
 
 @app.get("/uttale/Play")
 def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks):
+    """Play audio segment"""
     try:
         audio_data = get_audio_segment(filename, start, end)
     except HTTPException as e:
         raise e
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as tmp:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
         tmp.write(audio_data)
         tmp_path = tmp.name
     try:
-        subprocess.Popen(['play', tmp_path])
+        subprocess.Popen(["play", tmp_path])
     except:
         raise HTTPException(status_code=500, detail="Audio playback failed")
     def cleanup(tmp_file):
@@ -168,6 +171,7 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
 
 @app.get("/uttale/Audio")
 def audio_endpoint(filename: str, start: str, end: str):
+    """Extract audio segment"""
     try:
         audio_data = get_audio_segment(filename, start, end)
     except HTTPException as e:
@@ -177,20 +181,21 @@ def audio_endpoint(filename: str, start: str, end: str):
 
 @app.post("/uttale/Reindex")
 def trigger_reindex(background_tasks: BackgroundTasks):
+    """Trigger reindexing of subtitle files"""
     background_tasks.add_task(reindex, args.root)
     return {"status": "Reindexing started in background"}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--root', default='.')
-    parser.add_argument('--iface', default='0.0.0.0:7010')
-    parser.add_argument('--reindex', action='store_true', default=False)
+    parser.add_argument("--root", default=".")
+    parser.add_argument("--iface", default="0.0.0.0:7010")
+    parser.add_argument("--reindex", action="store_true", default=False)
     args = parser.parse_args()
-    db_duckdb = duckdb.connect('lines_duckdb.db')
+    db_duckdb = duckdb.connect("lines_duckdb.db")
     if args.reindex:
         reindex(args.root)
     try:
-        iface, port = args.iface.split(':')
+        iface, port = args.iface.split(":")
     except:
         exit(1)
     uvicorn.run(app, host=iface, port=int(port))

@@ -126,6 +126,13 @@ class SearchUI(QMainWindow):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.close()
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_K:
+                self.text_search.setFocus()
+                self.text_search.selectAll()
+            elif event.key() == Qt.Key.Key_M:
+                self.scope_search.setFocus()
+                self.scope_search.selectAll()
         else:
             super().keyPressEvent(event)
 
@@ -179,6 +186,7 @@ class SearchUI(QMainWindow):
         for result in results:
             item_widget = QWidget()
             item_layout = QHBoxLayout(item_widget)
+            item_layout.setContentsMargins(0, 0, 0, 0)
 
             text = (f"{result.text} \n"
                    f"[{result.start} - {result.end}]")

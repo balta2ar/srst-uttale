@@ -82,18 +82,6 @@ class SearchUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api = UttaleAPI("http://localhost:7010")
-
-        self.setWindowTitle("Uttale Search")
-        self.setGeometry(100, 100, 800, 600)
-
-        # Center on current screen
-        screen = QApplication.screenAt(QCursor.pos())
-        if screen:
-            center = screen.geometry().center()
-            geo = self.frameGeometry()
-            geo.moveCenter(center)
-            self.move(geo.topLeft())
-
         self.setup_ui()
         self.setup_timers()
         self.setup_temporary_storage()
@@ -162,7 +150,14 @@ class SearchUI(QMainWindow):
     def save_state(self):
         state = {
             'scope': self.scope_search.text(),
-            'text': self.text_search.text()
+            'text': self.text_search.text(),
+            'geometry': {
+                'x': self.x(),
+                'y': self.y(),
+                'width': self.width(),
+                'height': self.height(),
+            },
+            'screen': QApplication.screenAt(self.pos()).name(),
         }
         self.state_file.write_text(dumps(state))
 
@@ -172,6 +167,24 @@ class SearchUI(QMainWindow):
                 state = loads(self.state_file.read_text())
                 self.scope_search.setText(state.get('scope', ''))
                 self.text_search.setText(state.get('text', ''))
+
+                saved_screen = state.get('screen')
+                if saved_screen:
+                    for screen in QApplication.screens():
+                        if screen.name() == saved_screen:
+                            geo = self.frameGeometry()
+                            geo.moveCenter(screen.geometry().center())
+                            self.move(geo.topLeft())
+                            break
+
+                geometry = state.get('geometry', {})
+                if geometry:
+                    self.setGeometry(
+                        geometry.get('x', 100),
+                        geometry.get('y', 100),
+                        geometry.get('width', 800),
+                        geometry.get('height', 600)
+                    )
             except:
                 pass
 

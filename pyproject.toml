@@ -15,6 +15,7 @@ dependencies = [
     "polars>=1.7.1",
     "pyarrow>=17.0.0",
     "xapian-bindings>=0.1.0",
+    "pyqt6>=6.8.0",
 ]
 
 [build-system]

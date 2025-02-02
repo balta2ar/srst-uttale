@@ -76,10 +76,7 @@ class UttaleAPI:
 
         try:
             with urlopen(url) as response:
-                # The API now returns JSON content
-                data = loads(response.read().decode())
-                # You may need to adjust this based on how the audio data is actually returned
-                return data.get('audio_data', None)
+                return response.read()
         except URLError as e:
             print(f"Audio fetch error: {e}")
             return None
@@ -282,7 +279,7 @@ class SearchUI(QMainWindow):
                 pass
 
         try:
-            temp_file = self.temp_dir / f"audio_{hash(result.filename + result.start + result.end)}.wav"
+            temp_file = self.temp_dir / f"audio_{hash(result.filename + result.start + result.end)}.ogg"
 
             if not temp_file.exists():
                 audio_data = self.api.get_audio(

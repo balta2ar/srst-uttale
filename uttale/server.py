@@ -128,7 +128,7 @@ def reindex(root: str):
         db_duckdb.execute("DELETE FROM lines")
         db_duckdb.execute("INSERT INTO lines SELECT filename, start, end_time, text FROM df")
         db_duckdb.execute("DELETE FROM scopes")
-        db_duckdb.execute("INSERT INTO scopes SELECT DISTINCT SPLIT_PART(filename, '/', 1) || '/' || SPLIT_PART(filename, '/', 2) AS scope FROM lines ORDER BY scope")
+        db_duckdb.execute("INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope")
         db_duckdb.unregister("df")
     db_duckdb.commit()
 

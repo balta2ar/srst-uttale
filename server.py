@@ -7,6 +7,7 @@ import threading
 import time
 from os.path import exists, join, relpath, splitext
 from typing import Dict, List
+from pydantic import BaseModel
 
 import duckdb
 import polars as pl
@@ -14,6 +15,15 @@ import uvicorn
 import webvtt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from tqdm import tqdm
+
+class SearchResult(BaseModel):
+    filename: str
+    text: str
+    start: str
+    end: str
+
+class StatusResponse(BaseModel):
+    status: str
 
 app = FastAPI()
 db_duckdb = None
@@ -106,7 +116,7 @@ def reindex(root: str):
         db_duckdb.unregister("df")
     db_duckdb.commit()
 
-@app.get("/uttale/Scopes")
+@app.get("/uttale/Scopes", response_model=list[str])
 def scopes(q: str = "", limit: int = 100) -> List[str]:
     """Search for scopes in the database"""
     try:
@@ -115,8 +125,8 @@ def scopes(q: str = "", limit: int = 100) -> List[str]:
     except:
         return []
 
-@app.get("/uttale/Search")
-def search(q: str, scope: str = "", limit: int = 100) -> List[Dict]:
+@app.get("/uttale/Search", response_model=list[SearchResult])
+def search(q: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
     """Search for text in the database given a scope"""
     try:
         cursor = db_duckdb.execute(
@@ -124,7 +134,7 @@ def search(q: str, scope: str = "", limit: int = 100) -> List[Dict]:
             (f"%{q}%", f"%{scope}%", limit)).fetchall()
     except:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
-    return [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]
+    return [SearchResult(filename=row[0], text=row[3], start=row[1], end=row[2]) for row in cursor]
 
 def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     o = splitext(join(args.root, filename))[0] + ".ogg"
@@ -144,8 +154,8 @@ def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     except:
         raise HTTPException(status_code=500, detail="Audio processing failed")
 
-@app.get("/uttale/Play")
-def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks):
+@app.get("/uttale/Play", response_model=StatusResponse)
+def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks) -> StatusResponse:
     """Play audio segment"""
     try:
         audio_data = get_audio_segment(filename, start, end)
@@ -166,7 +176,7 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
         except:
             pass
     background_tasks.add_task(cleanup, tmp_path)
-    return {"status": "playing"}
+    return StatusResponse(status="playing")
 
 @app.get("/uttale/Audio")
 def audio_endpoint(filename: str, start: str, end: str):
@@ -178,11 +188,11 @@ def audio_endpoint(filename: str, start: str, end: str):
     headers = {"Cache-Control": "max-age=86400"}
     return Response(content=audio_data, media_type="application/octet-stream", headers=headers)
 
-@app.post("/uttale/Reindex")
-def trigger_reindex(background_tasks: BackgroundTasks):
+@app.post("/uttale/Reindex", response_model=StatusResponse)
+def trigger_reindex(background_tasks: BackgroundTasks) -> StatusResponse:
     """Trigger reindexing of subtitle files"""
     background_tasks.add_task(reindex, args.root)
-    return {"status": "Reindexing started in background"}
+    return StatusResponse(status="Reindexing started in background")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

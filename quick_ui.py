@@ -136,7 +136,7 @@ class SearchUI(QMainWindow):
                     self.text_search.setFocus()
                     self.text_search.selectAll()
                     return True
-                elif event.key() == Qt.Key.Key_M:
+                elif event.key() == Qt.Key.Key_L:
                     self.scope_search.setFocus()
                     self.scope_search.selectAll()
                     return True

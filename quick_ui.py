@@ -131,12 +131,12 @@ class SearchUI(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
     def keyPressEvent(self, event: QKeyEvent) -> None:
-            if event.key() == Qt.Key.Key_Escape:
-                self.close()
-            elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q:
-                self.close()
-            else:
-                super().keyPressEvent(event)
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q:
+            self.close()
+        else:
+            super().keyPressEvent(event)
 
     def setup_timers(self):
         self.scope_timer = QTimer()

@@ -27,6 +27,15 @@ class Search(BaseModel):
     limit: int = 100
     results: list[dict] = []
 
+class Play(BaseModel):
+    filename: str
+    start: str
+    end: str
+    status: str = ""
+
+class Reindex(BaseModel):
+    status: str = ""
+
 class StatusResponse(BaseModel):
     status: str
 
@@ -163,9 +172,10 @@ def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     except:
         raise HTTPException(status_code=500, detail="Audio processing failed")
 
-@app.get("/uttale/Play", response_model=StatusResponse)
-def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks) -> StatusResponse:
+@app.get("/uttale/Play", response_model=Play)
+def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks) -> Play:
     """Play audio segment"""
+    result = Play(filename=filename, start=start, end=end)
     try:
         audio_data = get_audio_segment(filename, start, end)
     except HTTPException as e:
@@ -185,7 +195,8 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
         except:
             pass
     background_tasks.add_task(cleanup, tmp_path)
-    return StatusResponse(status="playing")
+    result.status = "playing"
+    return result
 
 @app.get("/uttale/Audio")
 def audio_endpoint(filename: str, start: str, end: str):
@@ -197,11 +208,13 @@ def audio_endpoint(filename: str, start: str, end: str):
     headers = {"Cache-Control": "max-age=86400"}
     return Response(content=audio_data, media_type="application/octet-stream", headers=headers)
 
-@app.post("/uttale/Reindex", response_model=StatusResponse)
-def trigger_reindex(background_tasks: BackgroundTasks) -> StatusResponse:
+@app.post("/uttale/Reindex", response_model=Reindex)
+def trigger_reindex(background_tasks: BackgroundTasks) -> Reindex:
     """Trigger reindexing of subtitle files"""
+    result = Reindex()
     background_tasks.add_task(reindex, args.root)
-    return StatusResponse(status="Reindexing started in background")
+    result.status = "Reindexing started in background"
+    return result
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

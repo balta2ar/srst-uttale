@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QTextEdit,
 )
 
 logging.basicConfig(
@@ -172,6 +173,17 @@ class SearchUI(QMainWindow):
         episode_layout.addWidget(self.episode_results)
 
         self.tab_widget.addTab(self.episode_tab, "Episode")
+
+        self.help_tab = QWidget()
+        help_layout = QVBoxLayout(self.help_tab)
+
+        self.help_text = QTextEdit()
+        self.help_text.setReadOnly(True)
+        self.help_text.setHtml('''
+            <h1>Uttale</h1>''')
+        help_layout.addWidget(self.help_text)
+
+        self.tab_widget.addTab(self.help_tab, "Help")
 
         self.scope_search.textChanged.connect(self.on_scope_search_changed)
         self.text_search.textChanged.connect(self.on_text_search_changed)

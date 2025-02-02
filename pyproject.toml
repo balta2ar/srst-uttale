@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-uttale = "uttale.quick_ui:main"
+srst-uttale = "uttale.quick_ui:main"
 
 [build-system]
 requires = ["hatchling"]

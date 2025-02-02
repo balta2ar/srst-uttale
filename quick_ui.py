@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from json import dumps, loads
+from os import environ
 from pathlib import Path
 from subprocess import DEVNULL, Popen
 from sys import argv, exit
@@ -81,7 +82,8 @@ class UttaleAPI:
 class SearchUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.api = UttaleAPI("http://localhost:7010")
+        base_url = environ.get("UTTALE_API", "http://localhost:7010")
+        self.api = UttaleAPI(base_url)
 
         self.setWindowTitle("Uttale")
         self.setObjectName("Uttale")

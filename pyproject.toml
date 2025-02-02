@@ -1,7 +1,7 @@
 [project]
 name = "uttale"
 version = "0.1.0"
-description = "Add your description here"
+description = "Audio extraction and subtitle search tool"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,6 +18,9 @@ dependencies = [
     "pyqt6>=6.8.0",
     "pydantic>=2.10.6",
 ]
+
+[project.scripts]
+uttale = "uttale.quick_ui:main"
 
 [build-system]
 requires = ["hatchling"]

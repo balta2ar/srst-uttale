@@ -36,6 +36,17 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+def timestamp_to_seconds(timestamp: str) -> float:
+    time_parts = timestamp.split(':')
+    if len(time_parts) == 3:  # HH:MM:SS.mmm
+        h, m, s = time_parts
+        s, ms = s.split('.')
+        return int(h) * 3600 + int(m) * 60 + int(s) + float(f"0.{ms}")
+    else:  # MM:SS.mmm
+        m, s = time_parts
+        s, ms = s.split('.')
+        return int(m) * 60 + int(s) + float(f"0.{ms}")
+
 @dataclass
 class SearchResult:
     filename: str
@@ -284,11 +295,6 @@ class SearchUI(QMainWindow):
                 self.episode_scope_search.setText(state.get("episode_scope", ""))
                 self.tab_widget.setCurrentIndex(state.get("current_tab", 0))
 
-                if state.get("episode_scope"):
-                    item = QListWidgetItem(state["episode_scope"])
-                    self.episode_scope_suggestions.addItem(item)
-                    self.on_episode_scope_selected(item)
-
                 saved_screen = state.get("screen")
                 if saved_screen:
                     for screen in QApplication.screens():
@@ -350,7 +356,8 @@ class SearchUI(QMainWindow):
         self.search_text()
 
     def on_episode_scope_selected(self, item):
-        if not item: return
+        if not item:
+            return
 
         scope = item.text()
         self.download_episode_audio(scope)
@@ -403,10 +410,10 @@ class SearchUI(QMainWindow):
             return
 
         try:
-            self.current_player.stdin.write(b"get_time_pos\n")
+            self.current_player.stdin.write("get_time_pos\n")
             self.current_player.stdin.flush()
 
-            line = self.current_player.stdout.readline().decode()
+            line = self.current_player.stdout.readline()
             if "ANS_TIME_POSITION" in line:
                 position = float(line.split("=")[1])
                 self.highlight_current_position(position)
@@ -419,7 +426,7 @@ class SearchUI(QMainWindow):
         for i in range(self.episode_results.count()):
             item = self.episode_results.item(i)
             item_widget = self.episode_results.itemWidget(item)
-            start_time = float(item_widget.start_time)
+            start_time = timestamp_to_seconds(item_widget.start_time)
             text_button = item_widget.layout().itemAt(1).widget()
 
             if abs(position - start_time) < 0.5:
@@ -434,7 +441,7 @@ class SearchUI(QMainWindow):
         self.stop_episode_playback()
 
         try:
-            start_time = float(result.start) if result.start else 0
+            start_time = timestamp_to_seconds(result.start)
 
             self.current_player = Popen(
                 ["mplayer", "-slave", "-quiet", str(self.current_episode_file), "-ss", str(start_time)],

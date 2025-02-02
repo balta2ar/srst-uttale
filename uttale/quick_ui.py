@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import logging
 from dataclasses import dataclass
 from json import dumps, loads
 from os import environ
@@ -7,6 +8,7 @@ from pathlib import Path
 from subprocess import DEVNULL, Popen
 from sys import argv, exit
 from tempfile import gettempdir
+from time import perf_counter
 from typing import List, Optional
 from urllib.error import URLError
 from urllib.parse import quote, urlencode
@@ -39,6 +41,7 @@ class SearchResult:
 class UttaleAPI:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self.logger = logging.getLogger("UttaleAPI")
 
     def _make_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         try:
@@ -46,29 +49,40 @@ class UttaleAPI:
             if params:
                 url += "?" + urlencode(params)
 
+            self.logger.info(f"Making request to {url}")
+            start_time = perf_counter()
+
             with urlopen(url) as response:
-                return loads(response.read().decode())
+                data = response.read()
+                response_time = perf_counter() - start_time
+
+                response_json = loads(data.decode())
+                self.logger.info(f"Response received in {response_time:.3f}s: {response_json}")
+                return response_json
+
         except URLError as e:
-            print(f"API Error: {e}")
+            self.logger.error(f"API Error: {e}")
             return None
 
     def search_scopes(self, query: str, limit: int = 100) -> List[str]:
+        self.logger.info(f"Searching scopes with query='{query}', limit={limit}")
         result = self._make_request("/uttale/Scopes", {
             "q": query,
             "limit": limit,
         })
-        if result and isinstance(result.get('results'), list):
-            return result['results']
+        if result and isinstance(result.get("results"), list):
+            return result["results"]
         return []
 
     def search_text(self, query: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
+        self.logger.info(f"Searching text with query='{query}', scope='{scope}', limit={limit}")
         result = self._make_request("/uttale/Search", {
             "q": query,
             "scope": scope,
             "limit": limit,
         })
-        if result and isinstance(result.get('results'), list):
-            return [SearchResult(**item) for item in result['results']]
+        if result and isinstance(result.get("results"), list):
+            return [SearchResult(**item) for item in result["results"]]
         return []
 
     def get_audio(self, filename: str, start: str, end: str) -> bytes:
@@ -78,10 +92,19 @@ class UttaleAPI:
             f"end={quote(end)}")
 
         try:
+            self.logger.info(f"Fetching audio from {url}")
+            start_time = perf_counter()
+
             with urlopen(url) as response:
-                return response.read()
+                data = response.read()
+                response_time = perf_counter() - start_time
+
+                size_kb = len(data) / 1024
+                self.logger.info(f"Received {size_kb:.1f}KB of audio data in {response_time:.3f}s")
+                return data
+
         except URLError as e:
-            print(f"Audio fetch error: {e}")
+            self.logger.error(f"Audio fetch error: {e}")
             return None
 
 class SearchUI(QMainWindow):
@@ -107,11 +130,9 @@ class SearchUI(QMainWindow):
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
 
-        # Create tab widget
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
 
-        # Search tab
         self.search_tab = QWidget()
         search_layout = QVBoxLayout(self.search_tab)
 
@@ -133,7 +154,6 @@ class SearchUI(QMainWindow):
 
         self.tab_widget.addTab(self.search_tab, "Search")
 
-        # Episode tab
         self.episode_tab = QWidget()
         episode_layout = QVBoxLayout(self.episode_tab)
 
@@ -151,7 +171,6 @@ class SearchUI(QMainWindow):
 
         self.tab_widget.addTab(self.episode_tab, "Episode")
 
-        # Connect signals
         self.scope_search.textChanged.connect(self.on_scope_search_changed)
         self.text_search.textChanged.connect(self.on_text_search_changed)
         self.scope_suggestions.itemClicked.connect(self.on_scope_selected)
@@ -359,7 +378,6 @@ class SearchUI(QMainWindow):
         self.episode_scope_search.setText(result.filename)
         self.on_episode_scope_selected(QListWidget.item(self.episode_scope_suggestions, 0))
 
-        # Find and scroll to the matching item
         for i in range(self.episode_results.count()):
             item = self.episode_results.item(i)
             item_widget = self.episode_results.itemWidget(item)

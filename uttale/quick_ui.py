@@ -214,10 +214,11 @@ class SearchUI(QMainWindow):
 
     def on_scope_search_changed(self):
         self.scope_timer.start(200)
+        self.search_timer.start(500)
         self.save_timer.start(1000)
 
     def on_text_search_changed(self):
-        self.search_timer.start(1000)
+        self.search_timer.start(500)
         self.save_timer.start(1000)
 
     def search_scopes(self):

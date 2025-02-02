@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QTabWidget,
@@ -258,6 +259,8 @@ class SearchUI(QMainWindow):
         state = {
             "scope": self.scope_search.text(),
             "text": self.text_search.text(),
+            "episode_scope": self.episode_scope_search.text(),
+            "current_tab": self.tab_widget.currentIndex(),
             "geometry": {
                 "x": self.x(),
                 "y": self.y(),
@@ -274,6 +277,13 @@ class SearchUI(QMainWindow):
                 state = loads(self.state_file.read_text())
                 self.scope_search.setText(state.get("scope", ""))
                 self.text_search.setText(state.get("text", ""))
+                self.episode_scope_search.setText(state.get("episode_scope", ""))
+                self.tab_widget.setCurrentIndex(state.get("current_tab", 0))
+
+                if state.get("episode_scope"):
+                    item = QListWidgetItem(state["episode_scope"])
+                    self.episode_scope_suggestions.addItem(item)
+                    self.on_episode_scope_selected(item)
 
                 saved_screen = state.get("screen")
                 if saved_screen:
@@ -306,6 +316,7 @@ class SearchUI(QMainWindow):
 
     def on_episode_scope_search_changed(self):
         self.episode_scope_timer.start(200)
+        self.save_timer.start(1000)
 
     def search_scopes(self):
         query = self.scope_search.text()
@@ -335,8 +346,8 @@ class SearchUI(QMainWindow):
         self.search_text()
 
     def on_episode_scope_selected(self, item):
-        self.episode_scope_search.setText(item.text())
-        self.episode_scope_suggestions.hide()
+        if not item: return
+
         scope = item.text()
         results = self.api.search_text("", scope)
 
@@ -402,7 +413,19 @@ class SearchUI(QMainWindow):
     def show_episode(self, result: SearchResult):
         self.tab_widget.setCurrentIndex(1)
         self.episode_scope_search.setText(result.filename)
-        self.on_episode_scope_selected(QListWidget.item(self.episode_scope_suggestions, 0))
+
+        suggestions = [
+            self.episode_scope_suggestions.item(i).text()
+            for i in range(self.episode_scope_suggestions.count())
+        ]
+
+        if result.filename not in suggestions:
+            item = QListWidgetItem(result.filename)
+            self.episode_scope_suggestions.addItem(item)
+        else:
+            item = self.episode_scope_suggestions.findItems(result.filename, Qt.MatchFlag.MatchExactly)[0]
+
+        self.on_episode_scope_selected(item)
 
         for i in range(self.episode_results.count()):
             item = self.episode_results.item(i)

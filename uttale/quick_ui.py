@@ -192,21 +192,31 @@ class SearchUI(QMainWindow):
         self.episode_scope_search.textChanged.connect(self.on_episode_scope_search_changed)
         self.episode_scope_suggestions.itemClicked.connect(self.on_episode_scope_selected)
 
-        self.scope_search.installEventFilter(self)
-        self.text_search.installEventFilter(self)
-        self.episode_scope_search.installEventFilter(self)
+        for widget in [main_widget, self.scope_search, self.text_search, self.episode_scope_search]:
+            widget.installEventFilter(self)
 
     def eventFilter(self, obj, event):
-        if event.type() == event.Type.KeyPress:
-            if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-                if event.key() == Qt.Key.Key_K:
-                    self.text_search.setFocus()
-                    self.text_search.selectAll()
-                    return True
-                elif event.key() == Qt.Key.Key_L:
-                    self.scope_search.setFocus()
-                    self.scope_search.selectAll()
-                    return True
+        if event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_K:
+                self.tab_widget.setCurrentWidget(self.search_tab)
+                self.text_search.setFocus()
+                self.text_search.selectAll()
+                return True
+            elif event.key() == Qt.Key.Key_L:
+                self.tab_widget.setCurrentWidget(self.search_tab)
+                self.scope_search.setFocus()
+                self.scope_search.selectAll()
+                return True
+        elif event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            if event.key() == Qt.Key.Key_Exclam:
+                self.tab_widget.setCurrentIndex(0)
+                return True
+            if event.key() == Qt.Key.Key_At:
+                self.tab_widget.setCurrentIndex(1)
+                return True
+            if event.key() == Qt.Key.Key_NumberSign:
+                self.tab_widget.setCurrentIndex(2)
+                return True
         return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:

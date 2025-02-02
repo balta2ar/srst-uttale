@@ -12,6 +12,8 @@ from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
+from pydub import AudioSegment
+from pydub.playback import play as pydub_play
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -274,7 +276,7 @@ class SearchUI(QMainWindow):
     def play_audio(self, result: SearchResult):
         if self.current_player:
             try:
-                self.current_player.terminate()
+                self.current_player = None
             except:
                 pass
 
@@ -285,22 +287,25 @@ class SearchUI(QMainWindow):
                 audio_data = self.api.get_audio(
                     result.filename, result.start, result.end)
                 if audio_data:
-                    temp_file.write_bytes(audio_data)
+                    temp_raw = self.temp_dir / f"raw_{temp_file.name}"
+                    temp_raw.write_bytes(audio_data)
+
+                    audio = AudioSegment.from_ogg(temp_raw)
+                    normalized_audio = audio.normalize()
+                    normalized_audio.export(temp_file, format="ogg")
+
+                    temp_raw.unlink()
                 else:
                     return
 
-            self.current_player = Popen(
-                ["mplayer", str(temp_file)],
-                stdout=DEVNULL,
-                stderr=DEVNULL,
-            )
+            audio = AudioSegment.from_ogg(temp_file)
+            pydub_play(audio)
 
         except Exception as e:
             print(f"Error playing audio: {e}")
 
     def closeEvent(self, event):
-        if self.current_player:
-            self.current_player.terminate()
+        self.current_player = None
 
         # Save state before closing
         self.save_state()

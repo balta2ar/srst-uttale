@@ -58,14 +58,14 @@ def get_and_normalize_audio(api, filename: str, start: str = "", end: str = "") 
     return temp_file
 
 def timestamp_to_seconds(timestamp: str) -> float:
-    time_parts = timestamp.split(':')
+    time_parts = timestamp.split(":")
     if len(time_parts) == 3:  # HH:MM:SS.mmm
         h, m, s = time_parts
-        s, ms = s.split('.')
+        s, ms = s.split(".")
         return int(h) * 3600 + int(m) * 60 + int(s) + float(f"0.{ms}")
     # otherwise: MM:SS.mmm
     m, s = time_parts
-    s, ms = s.split('.')
+    s, ms = s.split(".")
     return int(m) * 60 + int(s) + float(f"0.{ms}")
 
 @dataclass
@@ -161,6 +161,7 @@ class SearchUI(QMainWindow):
         self.load_saved_state()
         self._last_highlighted_idx = None
         self.player_start_time = None
+        self.is_player_paused = False
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -220,6 +221,7 @@ class SearchUI(QMainWindow):
             alt-!: Focus search tab<br>
             alt-@: Focus episode tab<br>
             alt-#: Focus help tab<br>
+            ctrl-t: Pause/play audio<br>
 """)
         help_layout.addWidget(self.help_text)
 
@@ -235,6 +237,20 @@ class SearchUI(QMainWindow):
         for widget in [main_widget, self.scope_search, self.text_search, self.episode_scope_search]:
             widget.installEventFilter(self)
 
+    def toggle_player_state(self):
+        if not self.current_player:
+            return
+
+        if self.is_player_paused:
+            self.current_player.stdin.write("pause\n")
+            self.player_start_time = perf_counter() - self.pause_position
+            self.is_player_paused = False
+        else:
+            self.pause_position = perf_counter() - self.player_start_time
+            self.current_player.stdin.write("pause\n")
+            self.is_player_paused = True
+        self.current_player.stdin.flush()
+
     def eventFilter(self, obj, event):
         if event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_K:
@@ -246,6 +262,9 @@ class SearchUI(QMainWindow):
                 self.tab_widget.setCurrentWidget(self.search_tab)
                 self.scope_search.setFocus()
                 self.scope_search.selectAll()
+                return True
+            if event.key() == Qt.Key.Key_T and not isinstance(obj, QLineEdit):
+                self.toggle_player_state()
                 return True
         elif event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.AltModifier:
             if event.key() == Qt.Key.Key_Exclam:
@@ -420,11 +439,12 @@ class SearchUI(QMainWindow):
             return
 
         try:
-            position = perf_counter() - self.player_start_time
-            self.highlight_current_position(position)
+            if not self.is_player_paused:
+                position = perf_counter() - self.player_start_time
+                self.highlight_current_position(position)
 
         except Exception as e:
-            logging.error(f"Error monitoring player: {e}")
+            logging.exception(f"Error monitoring player: {e}")
             self.stop_episode_playback()
 
     def highlight_current_position(self, position: float) -> None:
@@ -460,10 +480,11 @@ class SearchUI(QMainWindow):
             )
 
             self.player_start_time = perf_counter() - start_time
+            self.is_player_paused = False
             self.player_monitor_timer.start()
 
         except Exception as e:
-            logging.error(f"Error playing episode: {e}")
+            logging.exception(f"Error playing episode: {e}")
 
     def stop_episode_playback(self):
         if self.current_player:

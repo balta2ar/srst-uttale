@@ -12,7 +12,7 @@ from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QCursor, QKeyEvent
+from PyQt6.QtGui import QCursor, QFont, QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -82,6 +82,12 @@ class SearchUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.api = UttaleAPI("http://localhost:7010")
+
+        # Set application-wide font
+        app_font = QFont()
+        app_font.setPointSize(22)
+        QApplication.setFont(app_font)
+
         self.setup_ui()
         self.setup_timers()
         self.setup_temporary_storage()
@@ -130,6 +136,7 @@ class SearchUI(QMainWindow):
                     self.scope_search.selectAll()
                     return True
         return super().eventFilter(obj, event)
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
             self.close()

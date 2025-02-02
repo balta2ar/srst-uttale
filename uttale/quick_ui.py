@@ -92,7 +92,6 @@ class SearchUI(QMainWindow):
         self.setWindowTitle("Uttale")
         self.setObjectName("Uttale")
 
-        # Set application-wide font
         app_font = QFont()
         app_font.setPointSize(22)
         QApplication.setFont(app_font)
@@ -107,7 +106,6 @@ class SearchUI(QMainWindow):
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
 
-        # Search bars
         self.scope_search = QLineEdit()
         self.scope_search.setPlaceholderText("Search scopes...")
         layout.addWidget(self.scope_search)
@@ -124,12 +122,10 @@ class SearchUI(QMainWindow):
         self.results_list = QListWidget()
         layout.addWidget(self.results_list)
 
-        # Connect signals
         self.scope_search.textChanged.connect(self.on_scope_search_changed)
         self.text_search.textChanged.connect(self.on_text_search_changed)
         self.scope_suggestions.itemClicked.connect(self.on_scope_selected)
 
-        # Add event filters for keyboard shortcuts
         self.scope_search.installEventFilter(self)
         self.text_search.installEventFilter(self)
 
@@ -275,10 +271,8 @@ class SearchUI(QMainWindow):
 
     def play_audio(self, result: SearchResult):
         if self.current_player:
-            try:
-                self.current_player = None
-            except:
-                pass
+            self.current_player.terminate()
+            self.current_player = None
 
         try:
             temp_file = self.temp_dir / f"audio_{hash(result.filename + result.start + result.end)}.ogg"
@@ -298,19 +292,21 @@ class SearchUI(QMainWindow):
                 else:
                     return
 
-            audio = AudioSegment.from_ogg(temp_file)
-            pydub_play(audio)
+            self.current_player = Popen(
+                ["mplayer", str(temp_file)],
+                stdout=DEVNULL,
+                stderr=DEVNULL,
+            )
 
         except Exception as e:
             print(f"Error playing audio: {e}")
 
     def closeEvent(self, event):
-        self.current_player = None
+        if self.current_player:
+            self.current_player.terminate()
+            self.current_player = None
 
-        # Save state before closing
         self.save_state()
-
-        # Cleanup temp files
         for file in self.temp_dir.glob("audio_*.wav"):
             try:
                 file.unlink()

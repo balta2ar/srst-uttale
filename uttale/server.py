@@ -7,14 +7,15 @@ import threading
 import time
 from os.path import exists, join, relpath, splitext
 from typing import Dict, List
-from pydantic import BaseModel
 
 import duckdb
 import polars as pl
 import uvicorn
 import webvtt
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from pydantic import BaseModel
 from tqdm import tqdm
+
 
 class Scopes(BaseModel):
     q: str = ""
@@ -163,18 +164,22 @@ def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     if not exists(o):
         raise HTTPException(status_code=404, detail="File not found")
     try:
+        if not start and not end:
+            with open(o, 'rb') as f:
+                return f.read()
         start_sec = parse_time(start)
         end_sec = parse_time(end)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid time format")
-    duration = end_sec - start_sec
-    if duration <=0:
-        raise HTTPException(status_code=400, detail="End time must be greater than start time")
-    try:
+        duration = end_sec - start_sec
+        if duration <= 0:
+            raise HTTPException(status_code=400, detail="End time must be greater than start time")
         proc = subprocess.run(["ffmpeg", "-ss", str(start_sec), "-t", str(duration), "-i", o, "-f", "ogg", "pipe:1"], capture_output=True, check=True)
         return proc.stdout
-    except:
-        raise HTTPException(status_code=500, detail="Audio processing failed")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid time format") from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail="Audio processing failed") from e
+    except subprocess.SubprocessError as e:
+        raise HTTPException(status_code=500, detail="Audio processing failed") from e
 
 @app.get("/uttale/Play", response_model=Play)
 def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks) -> Play:

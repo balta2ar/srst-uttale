@@ -144,7 +144,7 @@ class SearchUI(QMainWindow):
         search_layout.addWidget(self.scope_search)
 
         self.scope_suggestions = QListWidget()
-        self.scope_suggestions.setMaximumHeight(100)
+        self.scope_suggestions.setMaximumHeight(250)
         self.scope_suggestions.hide()
         search_layout.addWidget(self.scope_suggestions)
 
@@ -180,7 +180,12 @@ class SearchUI(QMainWindow):
         self.help_text = QTextEdit()
         self.help_text.setReadOnly(True)
         self.help_text.setHtml('''
-            <h1>Uttale</h1>''')
+            ctrl-l: Focus scope search<br>
+            ctrl-k: Focus text search<br>
+            alt-!: Focus search tab<br>
+            alt-@: Focus episode tab<br>
+            alt-#: Focus help tab<br>
+''')
         help_layout.addWidget(self.help_text)
 
         self.tab_widget.addTab(self.help_tab, "Help")

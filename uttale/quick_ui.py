@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from json import dumps, loads
 from os import environ
 from pathlib import Path
-from subprocess import DEVNULL, Popen
+from subprocess import DEVNULL, PIPE, Popen
 from sys import argv, exit
 from tempfile import gettempdir
 from time import perf_counter
@@ -88,7 +88,7 @@ class UttaleAPI:
             return [SearchResult(**item) for item in result["results"]]
         return []
 
-    def get_audio(self, filename: str, start: str, end: str) -> bytes:
+    def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
         url = (f"{self.base_url}/uttale/Audio?"
             f"filename={quote(filename)}&"
             f"start={quote(start)}&"
@@ -248,6 +248,10 @@ class SearchUI(QMainWindow):
         self.episode_scope_timer.timeout.connect(self.search_episode_scopes)
 
         self.current_player = None
+        self.current_episode_file = None
+        self.player_monitor_timer = QTimer()
+        self.player_monitor_timer.setInterval(100)
+        self.player_monitor_timer.timeout.connect(self.monitor_player_position)
 
     def setup_temporary_storage(self):
         self.temp_dir = Path(gettempdir()) / "uttale_audio"
@@ -349,6 +353,7 @@ class SearchUI(QMainWindow):
         if not item: return
 
         scope = item.text()
+        self.download_episode_audio(scope)
         results = self.api.search_text("", scope)
 
         self.episode_results.clear()
@@ -365,15 +370,97 @@ class SearchUI(QMainWindow):
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)
             play_button.clicked.connect(
-                lambda checked, r=result: self.play_audio(r))
+                lambda checked, r=result: self.play_episode_from(r))
 
             item_layout.addWidget(play_button)
             item_layout.addWidget(text_button)
 
+            item_widget.start_time = result.start
             self.episode_results.addItem("")
             self.episode_results.setItemWidget(
                 self.episode_results.item(self.episode_results.count()-1),
                 item_widget)
+
+    def download_episode_audio(self, filename):
+        temp_file = self.temp_dir / f"episode_{hash(filename)}.ogg"
+        if not temp_file.exists():
+            audio_data = self.api.get_audio(filename)
+            if audio_data:
+                temp_raw = self.temp_dir / f"raw_{temp_file.name}"
+                temp_raw.write_bytes(audio_data)
+
+                audio = AudioSegment.from_ogg(temp_raw)
+                normalized_audio = audio.normalize()
+                normalized_audio.export(temp_file, format="ogg")
+
+                temp_raw.unlink()
+
+        self.current_episode_file = temp_file
+
+    def monitor_player_position(self):
+        if not self.current_player:
+            self.player_monitor_timer.stop()
+            return
+
+        try:
+            self.current_player.stdin.write(b"get_time_pos\n")
+            self.current_player.stdin.flush()
+
+            line = self.current_player.stdout.readline().decode()
+            if "ANS_TIME_POSITION" in line:
+                position = float(line.split("=")[1])
+                self.highlight_current_position(position)
+
+        except Exception as e:
+            logging.error(f"Error monitoring player: {e}")
+            self.stop_episode_playback()
+
+    def highlight_current_position(self, position):
+        for i in range(self.episode_results.count()):
+            item = self.episode_results.item(i)
+            item_widget = self.episode_results.itemWidget(item)
+            start_time = float(item_widget.start_time)
+            text_button = item_widget.layout().itemAt(1).widget()
+
+            if abs(position - start_time) < 0.5:
+                text_button.setStyleSheet("text-align: left; background-color: #90EE90;")
+            else:
+                text_button.setStyleSheet("text-align: left;")
+
+    def play_episode_from(self, result: SearchResult):
+        if not self.current_episode_file:
+            return
+
+        self.stop_episode_playback()
+
+        try:
+            start_time = float(result.start) if result.start else 0
+
+            self.current_player = Popen(
+                ["mplayer", "-slave", "-quiet", str(self.current_episode_file), "-ss", str(start_time)],
+                stdin=PIPE,
+                stdout=PIPE,
+                stderr=DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+
+            self.player_monitor_timer.start()
+
+        except Exception as e:
+            logging.error(f"Error playing episode: {e}")
+
+    def stop_episode_playback(self):
+        if self.current_player:
+            self.current_player.terminate()
+            self.current_player = None
+            self.player_monitor_timer.stop()
+
+            for i in range(self.episode_results.count()):
+                item = self.episode_results.item(i)
+                item_widget = self.episode_results.itemWidget(item)
+                text_button = item_widget.layout().itemAt(1).widget()
+                text_button.setStyleSheet("text-align: left;")
 
     def search_text(self):
         query = self.text_search.text()

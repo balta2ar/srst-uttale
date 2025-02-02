@@ -47,18 +47,15 @@ def get_and_normalize_audio(api, filename: str, start: str = "", end: str = "") 
     temp_file = make_temp_path(f"{filename}{start}{end}")
     if not temp_file.exists():
         audio_data = api.get_audio(filename, start, end)
-        if audio_data:
-            temp_raw = make_temp_path(f"raw_{filename}{start}{end}")
-            temp_raw.write_bytes(audio_data)
+        temp_raw = make_temp_path(f"raw_{filename}{start}{end}")
+        temp_raw.write_bytes(audio_data)
 
-            audio = AudioSegment.from_ogg(temp_raw)
-            normalized_audio = audio.normalize()
-            normalized_audio.export(temp_file, format="ogg")
+        audio = AudioSegment.from_ogg(temp_raw)
+        normalized_audio = audio.normalize()
+        normalized_audio.export(temp_file, format="ogg")
 
-            temp_raw.unlink()
-            return temp_file
-
-    return None
+        temp_raw.unlink()
+    return temp_file
 
 def timestamp_to_seconds(timestamp: str) -> float:
     time_parts = timestamp.split(':')
@@ -104,7 +101,7 @@ class UttaleAPI:
             self.logger.error(f"API Error: {e}")
             return None
 
-    def search_scopes(self, query: str, limit: int = 100) -> List[str]:
+    def search_scopes(self, query: str, limit: int = 1000) -> List[str]:
         result = self._make_request("/uttale/Scopes", {
             "q": query,
             "limit": limit,
@@ -113,7 +110,7 @@ class UttaleAPI:
             return result["results"]
         return []
 
-    def search_text(self, query: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
+    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List[SearchResult]:
         result = self._make_request("/uttale/Search", {
             "q": query,
             "scope": scope,
@@ -381,7 +378,7 @@ class SearchUI(QMainWindow):
         self.scope_suggestions.hide()
         self.search_text()
 
-    def on_episode_scope_selected(self, item):
+    def on_episode_scope_selected(self, item) -> None:
         if not item:
             return
 
@@ -550,9 +547,6 @@ class SearchUI(QMainWindow):
 
         try:
             temp_file = get_and_normalize_audio(self.api, result.filename, result.start, result.end)
-            if not temp_file:
-                return
-
             self.current_player = Popen(
                 ["mplayer", str(temp_file)],
                 stdout=DEVNULL,

@@ -30,6 +30,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 @dataclass
 class SearchResult:
@@ -49,7 +53,7 @@ class UttaleAPI:
             if params:
                 url += "?" + urlencode(params)
 
-            self.logger.info(f"Making request to {url}")
+            self.logger.info(f"{url}")
             start_time = perf_counter()
 
             with urlopen(url) as response:
@@ -57,7 +61,7 @@ class UttaleAPI:
                 response_time = perf_counter() - start_time
 
                 response_json = loads(data.decode())
-                self.logger.info(f"Response received in {response_time:.3f}s: {response_json}")
+                self.logger.info(f"Received in {response_time:.3f}s: {response_json}")
                 return response_json
 
         except URLError as e:
@@ -65,7 +69,6 @@ class UttaleAPI:
             return None
 
     def search_scopes(self, query: str, limit: int = 100) -> List[str]:
-        self.logger.info(f"Searching scopes with query='{query}', limit={limit}")
         result = self._make_request("/uttale/Scopes", {
             "q": query,
             "limit": limit,
@@ -75,7 +78,6 @@ class UttaleAPI:
         return []
 
     def search_text(self, query: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
-        self.logger.info(f"Searching text with query='{query}', scope='{scope}', limit={limit}")
         result = self._make_request("/uttale/Search", {
             "q": query,
             "scope": scope,
@@ -92,7 +94,7 @@ class UttaleAPI:
             f"end={quote(end)}")
 
         try:
-            self.logger.info(f"Fetching audio from {url}")
+            self.logger.info(f"{url}")
             start_time = perf_counter()
 
             with urlopen(url) as response:

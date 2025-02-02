@@ -83,6 +83,9 @@ class SearchUI(QMainWindow):
         super().__init__()
         self.api = UttaleAPI("http://localhost:7010")
 
+        self.setWindowTitle("Uttale")
+        self.setObjectName("Uttale")
+
         # Set application-wide font
         app_font = QFont()
         app_font.setPointSize(22)

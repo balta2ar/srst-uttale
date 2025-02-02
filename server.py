@@ -16,6 +16,11 @@ import webvtt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from tqdm import tqdm
 
+class Scopes(BaseModel):
+    q: str = ""
+    limit: int = 100
+    results: list[str] = []
+
 class Search(BaseModel):
     q: str
     scope: str = ""
@@ -116,14 +121,16 @@ def reindex(root: str):
         db_duckdb.unregister("df")
     db_duckdb.commit()
 
-@app.get("/uttale/Scopes", response_model=list[str])
-def scopes(q: str = "", limit: int = 100) -> List[str]:
+@app.get("/uttale/Scopes", response_model=Scopes)
+def scopes(q: str = "", limit: int = 100) -> Scopes:
     """Search for scopes in the database"""
+    result = Scopes(q=q, limit=limit)
     try:
         cursor = db_duckdb.execute("SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?", (f"%{q}%", limit)).fetchall()
-        return [row[0] for row in cursor]
+        result.results = [row[0] for row in cursor]
     except:
-        return []
+        pass
+    return result
 
 @app.get("/uttale/Search", response_model=Search)
 def search(q: str, scope: str = "", limit: int = 100) -> Search:

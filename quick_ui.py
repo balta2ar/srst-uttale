@@ -54,7 +54,9 @@ class UttaleAPI:
             "q": query,
             "limit": limit,
         })
-        return result if result else []
+        if result and isinstance(result.get('results'), list):
+            return result['results']
+        return []
 
     def search_text(self, query: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
         result = self._make_request("/uttale/Search", {
@@ -62,19 +64,22 @@ class UttaleAPI:
             "scope": scope,
             "limit": limit,
         })
-        if not result:
-            return []
-        return [SearchResult(**item) for item in result]
+        if result and isinstance(result.get('results'), list):
+            return [SearchResult(**item) for item in result['results']]
+        return []
 
     def get_audio(self, filename: str, start: str, end: str) -> bytes:
         url = (f"{self.base_url}/uttale/Audio?"
-              f"filename={quote(filename)}&"
-              f"start={quote(start)}&"
-              f"end={quote(end)}")
+            f"filename={quote(filename)}&"
+            f"start={quote(start)}&"
+            f"end={quote(end)}")
 
         try:
             with urlopen(url) as response:
-                return response.read()
+                # The API now returns JSON content
+                data = loads(response.read().decode())
+                # You may need to adjust this based on how the audio data is actually returned
+                return data.get('audio_data', None)
         except URLError as e:
             print(f"Audio fetch error: {e}")
             return None

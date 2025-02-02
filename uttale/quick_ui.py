@@ -160,6 +160,7 @@ class SearchUI(QMainWindow):
         self.setup_temporary_storage()
         self.load_saved_state()
         self._last_highlighted_idx = None
+        self.player_start_time = None
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -414,18 +415,13 @@ class SearchUI(QMainWindow):
                 item_widget)
 
     def monitor_player_position(self):
-        if not self.current_player:
+        if not self.current_player or not self.player_start_time:
             self.player_monitor_timer.stop()
             return
 
         try:
-            self.current_player.stdin.write("get_time_pos\n")
-            self.current_player.stdin.flush()
-
-            line = self.current_player.stdout.readline()
-            if "ANS_TIME_POSITION" in line:
-                position = float(line.split("=")[1])
-                self.highlight_current_position(position)
+            position = perf_counter() - self.player_start_time
+            self.highlight_current_position(position)
 
         except Exception as e:
             logging.error(f"Error monitoring player: {e}")
@@ -463,6 +459,7 @@ class SearchUI(QMainWindow):
                 bufsize=1,
             )
 
+            self.player_start_time = perf_counter() - start_time
             self.player_monitor_timer.start()
 
         except Exception as e:
@@ -472,6 +469,7 @@ class SearchUI(QMainWindow):
         if self.current_player:
             self.current_player.terminate()
             self.current_player = None
+            self.player_start_time = None
             self.player_monitor_timer.stop()
 
             for i in range(self.episode_results.count()):
@@ -544,6 +542,7 @@ class SearchUI(QMainWindow):
         if self.current_player:
             self.current_player.terminate()
             self.current_player = None
+            self.player_start_time = None
 
         try:
             temp_file = get_and_normalize_audio(self.api, result.filename, result.start, result.end)
@@ -560,6 +559,7 @@ class SearchUI(QMainWindow):
         if self.current_player:
             self.current_player.terminate()
             self.current_player = None
+            self.player_start_time = None
 
         self.save_state()
         for file in self.temp_dir.glob("audio_*.wav"):

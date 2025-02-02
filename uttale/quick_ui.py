@@ -26,9 +26,9 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
-    QTextEdit,
 )
 
 logging.basicConfig(

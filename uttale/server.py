@@ -19,12 +19,14 @@ from tqdm import tqdm
 class Scopes(BaseModel):
     q: str = ""
     limit: int = 100
+    results_count: int = 0
     results: list[str] = []
 
 class Search(BaseModel):
     q: str
     scope: str = ""
     limit: int = 100
+    results_count: int = 0
     results: list[dict] = []
 
 class Play(BaseModel):
@@ -137,6 +139,7 @@ def scopes(q: str = "", limit: int = 100) -> Scopes:
     try:
         cursor = db_duckdb.execute("SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?", (f"%{q}%", limit)).fetchall()
         result.results = [row[0] for row in cursor]
+        result.results_count = len(result.results)
     except:
         pass
     return result
@@ -150,6 +153,7 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
             "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
             (f"%{q}%", f"%{scope}%", limit)).fetchall()
         result.results = [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]
+        result.results_count = len(result.results)
     except:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
     return result

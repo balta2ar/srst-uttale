@@ -17,10 +17,10 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from tqdm import tqdm
 
 class SearchResult(BaseModel):
-    filename: str
-    text: str
-    start: str
-    end: str
+    q: str
+    scope: str = ""
+    limit: int = 100
+    results: list[dict] = []
 
 class StatusResponse(BaseModel):
     status: str
@@ -125,16 +125,18 @@ def scopes(q: str = "", limit: int = 100) -> List[str]:
     except:
         return []
 
-@app.get("/uttale/Search", response_model=list[SearchResult])
-def search(q: str, scope: str = "", limit: int = 100) -> List[SearchResult]:
+@app.get("/uttale/Search", response_model=SearchResult)
+def search(q: str, scope: str = "", limit: int = 100) -> SearchResult:
     """Search for text in the database given a scope"""
+    result = SearchResult(q=q, scope=scope, limit=limit)
     try:
         cursor = db_duckdb.execute(
             "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
             (f"%{q}%", f"%{scope}%", limit)).fetchall()
+        result.results = [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]
     except:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
-    return [SearchResult(filename=row[0], text=row[3], start=row[1], end=row[2]) for row in cursor]
+    return result
 
 def get_audio_segment(filename: str, start: str, end: str) -> bytes:
     o = splitext(join(args.root, filename))[0] + ".ogg"

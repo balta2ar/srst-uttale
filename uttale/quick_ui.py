@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -106,28 +107,61 @@ class SearchUI(QMainWindow):
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
 
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # Search tab
+        self.search_tab = QWidget()
+        search_layout = QVBoxLayout(self.search_tab)
+
         self.scope_search = QLineEdit()
         self.scope_search.setPlaceholderText("Search scopes...")
-        layout.addWidget(self.scope_search)
+        search_layout.addWidget(self.scope_search)
 
         self.scope_suggestions = QListWidget()
         self.scope_suggestions.setMaximumHeight(100)
         self.scope_suggestions.hide()
-        layout.addWidget(self.scope_suggestions)
+        search_layout.addWidget(self.scope_suggestions)
 
         self.text_search = QLineEdit()
         self.text_search.setPlaceholderText("Search text...")
-        layout.addWidget(self.text_search)
+        search_layout.addWidget(self.text_search)
 
         self.results_list = QListWidget()
-        layout.addWidget(self.results_list)
+        search_layout.addWidget(self.results_list)
 
+        self.tab_widget.addTab(self.search_tab, "Search")
+
+        # Episode tab
+        self.episode_tab = QWidget()
+        episode_layout = QVBoxLayout(self.episode_tab)
+
+        self.episode_scope_search = QLineEdit()
+        self.episode_scope_search.setPlaceholderText("Search scopes...")
+        episode_layout.addWidget(self.episode_scope_search)
+
+        self.episode_scope_suggestions = QListWidget()
+        self.episode_scope_suggestions.setMaximumHeight(100)
+        self.episode_scope_suggestions.hide()
+        episode_layout.addWidget(self.episode_scope_suggestions)
+
+        self.episode_results = QListWidget()
+        episode_layout.addWidget(self.episode_results)
+
+        self.tab_widget.addTab(self.episode_tab, "Episode")
+
+        # Connect signals
         self.scope_search.textChanged.connect(self.on_scope_search_changed)
         self.text_search.textChanged.connect(self.on_text_search_changed)
         self.scope_suggestions.itemClicked.connect(self.on_scope_selected)
 
+        self.episode_scope_search.textChanged.connect(self.on_episode_scope_search_changed)
+        self.episode_scope_suggestions.itemClicked.connect(self.on_episode_scope_selected)
+
         self.scope_search.installEventFilter(self)
         self.text_search.installEventFilter(self)
+        self.episode_scope_search.installEventFilter(self)
 
     def eventFilter(self, obj, event):
         if event.type() == event.Type.KeyPress:
@@ -162,6 +196,10 @@ class SearchUI(QMainWindow):
         self.save_timer = QTimer()
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.save_state)
+
+        self.episode_scope_timer = QTimer()
+        self.episode_scope_timer.setSingleShot(True)
+        self.episode_scope_timer.timeout.connect(self.search_episode_scopes)
 
         self.current_player = None
 
@@ -221,6 +259,9 @@ class SearchUI(QMainWindow):
         self.search_timer.start(500)
         self.save_timer.start(1000)
 
+    def on_episode_scope_search_changed(self):
+        self.episode_scope_timer.start(200)
+
     def search_scopes(self):
         query = self.scope_search.text()
         scopes = self.api.search_scopes(query)
@@ -232,10 +273,51 @@ class SearchUI(QMainWindow):
         else:
             self.scope_suggestions.hide()
 
+    def search_episode_scopes(self):
+        query = self.episode_scope_search.text()
+        scopes = self.api.search_scopes(query)
+
+        self.episode_scope_suggestions.clear()
+        if scopes:
+            self.episode_scope_suggestions.show()
+            self.episode_scope_suggestions.addItems(scopes)
+        else:
+            self.episode_scope_suggestions.hide()
+
     def on_scope_selected(self, item):
         self.scope_search.setText(item.text())
         self.scope_suggestions.hide()
         self.search_text()
+
+    def on_episode_scope_selected(self, item):
+        self.episode_scope_search.setText(item.text())
+        self.episode_scope_suggestions.hide()
+        scope = item.text()
+        results = self.api.search_text("", scope)
+
+        self.episode_results.clear()
+        for result in results:
+            item_widget = QWidget()
+            item_layout = QHBoxLayout(item_widget)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+
+            text = (f"{result.text} \n"
+                   f"[{result.start} - {result.end}]")
+            text_button = QPushButton(text)
+            text_button.setStyleSheet("text-align: left;")
+
+            play_button = QPushButton("▶")
+            play_button.setFixedWidth(30)
+            play_button.clicked.connect(
+                lambda checked, r=result: self.play_audio(r))
+
+            item_layout.addWidget(play_button)
+            item_layout.addWidget(text_button)
+
+            self.episode_results.addItem("")
+            self.episode_results.setItemWidget(
+                self.episode_results.item(self.episode_results.count()-1),
+                item_widget)
 
     def search_text(self):
         query = self.text_search.text()
@@ -256,6 +338,8 @@ class SearchUI(QMainWindow):
                    f"[{result.start} - {result.end}]")
             text_button = QPushButton(text)
             text_button.setStyleSheet("text-align: left;")
+            text_button.clicked.connect(
+                lambda checked, r=result: self.show_episode(r))
 
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)
@@ -269,6 +353,20 @@ class SearchUI(QMainWindow):
             self.results_list.setItemWidget(
                 self.results_list.item(self.results_list.count()-1),
                 item_widget)
+
+    def show_episode(self, result: SearchResult):
+        self.tab_widget.setCurrentIndex(1)
+        self.episode_scope_search.setText(result.filename)
+        self.on_episode_scope_selected(QListWidget.item(self.episode_scope_suggestions, 0))
+
+        # Find and scroll to the matching item
+        for i in range(self.episode_results.count()):
+            item = self.episode_results.item(i)
+            item_widget = self.episode_results.itemWidget(item)
+            text_button = item_widget.layout().itemAt(1).widget()
+            if text_button.text() == f"{result.text}\n[{result.start} - {result.end}]":
+                self.episode_results.scrollToItem(item)
+                break
 
     def play_audio(self, result: SearchResult):
         if self.current_player:

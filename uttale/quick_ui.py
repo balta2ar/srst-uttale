@@ -15,7 +15,6 @@ from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
 from pydub import AudioSegment
-from pydub.playback import play as pydub_play
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -33,7 +32,7 @@ from PyQt6.QtWidgets import (
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
 @dataclass
@@ -54,7 +53,7 @@ class UttaleAPI:
             if params:
                 url += "?" + urlencode(params)
 
-            self.logger.info(f"{url}")
+            self.logger.info(url)
             start_time = perf_counter()
 
             with urlopen(url) as response:
@@ -95,20 +94,20 @@ class UttaleAPI:
             f"end={quote(end)}")
 
         try:
-            self.logger.info(f"{url}")
+            self.logger.info(url)
             start_time = perf_counter()
 
-            with urlopen(url) as response:
+            with urlopen("http://" + url.split("://")[1]) as response:
                 data = response.read()
                 response_time = perf_counter() - start_time
 
                 size_kb = len(data) / 1024
-                self.logger.info(f"Received {size_kb:.1f}KB of audio data in {response_time:.3f}s")
+                self.logger.info("Received %.1fKB of audio data in %.3fs", size_kb, response_time)
                 return data
 
         except URLError as e:
-            self.logger.error(f"Audio fetch error: {e}")
-            return None
+            self.logger.exception("Audio fetch error: %s", e)
+            return b""
 
 class SearchUI(QMainWindow):
     def __init__(self):
@@ -179,13 +178,13 @@ class SearchUI(QMainWindow):
 
         self.help_text = QTextEdit()
         self.help_text.setReadOnly(True)
-        self.help_text.setHtml('''
+        self.help_text.setHtml("""
             ctrl-l: Focus scope search<br>
             ctrl-k: Focus text search<br>
             alt-!: Focus search tab<br>
             alt-@: Focus episode tab<br>
             alt-#: Focus help tab<br>
-''')
+""")
         help_layout.addWidget(self.help_text)
 
         self.tab_widget.addTab(self.help_tab, "Help")
@@ -207,7 +206,7 @@ class SearchUI(QMainWindow):
                 self.text_search.setFocus()
                 self.text_search.selectAll()
                 return True
-            elif event.key() == Qt.Key.Key_L:
+            if event.key() == Qt.Key.Key_L:
                 self.tab_widget.setCurrentWidget(self.search_tab)
                 self.scope_search.setFocus()
                 self.scope_search.selectAll()
@@ -225,9 +224,7 @@ class SearchUI(QMainWindow):
         return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
-            self.close()
-        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q:
+        if event.key() == Qt.Key.Key_Escape or (event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q):
             self.close()
         else:
             super().keyPressEvent(event)
@@ -259,13 +256,13 @@ class SearchUI(QMainWindow):
     def save_state(self):
         screen = QApplication.screenAt(QCursor.pos())
         state = {
-            'scope': self.scope_search.text(),
-            'text': self.text_search.text(),
-            'geometry': {
-                'x': self.x(),
-                'y': self.y(),
-                'width': self.width(),
-                'height': self.height(),
+            "scope": self.scope_search.text(),
+            "text": self.text_search.text(),
+            "geometry": {
+                "x": self.x(),
+                "y": self.y(),
+                "width": self.width(),
+                "height": self.height(),
             },
             "screen": screen.name() if screen else None,
         }
@@ -275,10 +272,10 @@ class SearchUI(QMainWindow):
         if self.state_file.exists():
             try:
                 state = loads(self.state_file.read_text())
-                self.scope_search.setText(state.get('scope', ''))
-                self.text_search.setText(state.get('text', ''))
+                self.scope_search.setText(state.get("scope", ""))
+                self.text_search.setText(state.get("text", ""))
 
-                saved_screen = state.get('screen')
+                saved_screen = state.get("screen")
                 if saved_screen:
                     for screen in QApplication.screens():
                         if screen.name() == saved_screen:
@@ -287,13 +284,13 @@ class SearchUI(QMainWindow):
                             self.move(geo.topLeft())
                             break
 
-                geometry = state.get('geometry', {})
+                geometry = state.get("geometry", {})
                 if geometry:
                     self.setGeometry(
-                        geometry.get('x', 100),
-                        geometry.get('y', 100),
-                        geometry.get('width', 800),
-                        geometry.get('height', 600)
+                        geometry.get("x", 100),
+                        geometry.get("y", 100),
+                        geometry.get("width", 800),
+                        geometry.get("height", 600),
                     )
             except:
                 pass

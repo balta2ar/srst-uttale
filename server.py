@@ -16,7 +16,7 @@ import webvtt
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from tqdm import tqdm
 
-class SearchResult(BaseModel):
+class Search(BaseModel):
     q: str
     scope: str = ""
     limit: int = 100
@@ -125,10 +125,10 @@ def scopes(q: str = "", limit: int = 100) -> List[str]:
     except:
         return []
 
-@app.get("/uttale/Search", response_model=SearchResult)
-def search(q: str, scope: str = "", limit: int = 100) -> SearchResult:
+@app.get("/uttale/Search", response_model=Search)
+def search(q: str, scope: str = "", limit: int = 100) -> Search:
     """Search for text in the database given a scope"""
-    result = SearchResult(q=q, scope=scope, limit=limit)
+    result = Search(q=q, scope=scope, limit=limit)
     try:
         cursor = db_duckdb.execute(
             "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",

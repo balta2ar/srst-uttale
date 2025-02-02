@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+from bisect import bisect_left
 from dataclasses import dataclass
 from json import dumps, loads
 from os import environ
@@ -42,10 +43,10 @@ def timestamp_to_seconds(timestamp: str) -> float:
         h, m, s = time_parts
         s, ms = s.split('.')
         return int(h) * 3600 + int(m) * 60 + int(s) + float(f"0.{ms}")
-    else:  # MM:SS.mmm
-        m, s = time_parts
-        s, ms = s.split('.')
-        return int(m) * 60 + int(s) + float(f"0.{ms}")
+    # otherwise: MM:SS.mmm
+    m, s = time_parts
+    s, ms = s.split('.')
+    return int(m) * 60 + int(s) + float(f"0.{ms}")
 
 @dataclass
 class SearchResult:
@@ -138,6 +139,7 @@ class SearchUI(QMainWindow):
         self.setup_timers()
         self.setup_temporary_storage()
         self.load_saved_state()
+        self._last_highlighted_idx = None
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -180,6 +182,7 @@ class SearchUI(QMainWindow):
         self.episode_scope_suggestions.hide()
         episode_layout.addWidget(self.episode_scope_suggestions)
 
+        self.episode_start_times = []
         self.episode_results = QListWidget()
         episode_layout.addWidget(self.episode_results)
 
@@ -364,6 +367,8 @@ class SearchUI(QMainWindow):
         results = self.api.search_text("", scope)
 
         self.episode_results.clear()
+        self.episode_start_times = []
+
         for result in results:
             item_widget = QWidget()
             item_layout = QHBoxLayout(item_widget)
@@ -382,7 +387,7 @@ class SearchUI(QMainWindow):
             item_layout.addWidget(play_button)
             item_layout.addWidget(text_button)
 
-            item_widget.start_time = result.start
+            self.episode_start_times.append(timestamp_to_seconds(result.start))
             self.episode_results.addItem("")
             self.episode_results.setItemWidget(
                 self.episode_results.item(self.episode_results.count()-1),
@@ -422,17 +427,20 @@ class SearchUI(QMainWindow):
             logging.error(f"Error monitoring player: {e}")
             self.stop_episode_playback()
 
-    def highlight_current_position(self, position):
-        for i in range(self.episode_results.count()):
-            item = self.episode_results.item(i)
-            item_widget = self.episode_results.itemWidget(item)
-            start_time = timestamp_to_seconds(item_widget.start_time)
-            text_button = item_widget.layout().itemAt(1).widget()
+    def highlight_current_position(self, position: float) -> None:
+        idx = bisect_left(self.episode_start_times, position)
+        if idx >= len(self.episode_start_times):
+            idx = len(self.episode_start_times) - 1
 
-            if abs(position - start_time) < 0.5:
-                text_button.setStyleSheet("text-align: left; background-color: #90EE90;")
-            else:
-                text_button.setStyleSheet("text-align: left;")
+        if self._last_highlighted_idx is not None:
+            last_item = self.episode_results.item(self._last_highlighted_idx)
+            last_widget = self.episode_results.itemWidget(last_item)
+            last_widget.layout().itemAt(1).widget().setStyleSheet("text-align: left;")
+
+        item = self.episode_results.item(idx)
+        widget = self.episode_results.itemWidget(item)
+        widget.layout().itemAt(1).widget().setStyleSheet("text-align: left; background-color: #90EE90;")
+        self._last_highlighted_idx = idx
 
     def play_episode_from(self, result: SearchResult):
         if not self.current_episode_file:

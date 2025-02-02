@@ -3,6 +3,7 @@
 import logging
 from bisect import bisect_left
 from dataclasses import dataclass
+from hashlib import blake2b
 from json import dumps, loads
 from os import environ
 from pathlib import Path
@@ -10,7 +11,7 @@ from subprocess import DEVNULL, PIPE, Popen
 from sys import argv, exit
 from tempfile import gettempdir
 from time import perf_counter
-from typing import List, Optional
+from typing import List, Optional, Union
 from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
@@ -36,6 +37,28 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+def get_and_normalize_audio(api, filename: str, start: str = "", end: str = "") -> Union[Path, None]:
+    def make_temp_path(content: str) -> Path:
+        h = blake2b(digest_size=16)
+        h.update(content.encode())
+        return Path(gettempdir()) / "uttale_audio" / f"audio_{h.hexdigest()}.ogg"
+
+    temp_file = make_temp_path(f"{filename}{start}{end}")
+    if not temp_file.exists():
+        audio_data = api.get_audio(filename, start, end)
+        if audio_data:
+            temp_raw = make_temp_path(f"raw_{filename}{start}{end}")
+            temp_raw.write_bytes(audio_data)
+
+            audio = AudioSegment.from_ogg(temp_raw)
+            normalized_audio = audio.normalize()
+            normalized_audio.export(temp_file, format="ogg")
+
+            temp_raw.unlink()
+            return temp_file
+
+    return None
 
 def timestamp_to_seconds(timestamp: str) -> float:
     time_parts = timestamp.split(':')
@@ -363,7 +386,7 @@ class SearchUI(QMainWindow):
             return
 
         scope = item.text()
-        self.download_episode_audio(scope)
+        self.current_episode_file = get_and_normalize_audio(self.api, scope)
         results = self.api.search_text("", scope)
 
         self.episode_results.clear()
@@ -393,22 +416,6 @@ class SearchUI(QMainWindow):
                 self.episode_results.item(self.episode_results.count()-1),
                 item_widget)
 
-    def download_episode_audio(self, filename):
-        temp_file = self.temp_dir / f"episode_{hash(filename)}.ogg"
-        if not temp_file.exists():
-            audio_data = self.api.get_audio(filename)
-            if audio_data:
-                temp_raw = self.temp_dir / f"raw_{temp_file.name}"
-                temp_raw.write_bytes(audio_data)
-
-                audio = AudioSegment.from_ogg(temp_raw)
-                normalized_audio = audio.normalize()
-                normalized_audio.export(temp_file, format="ogg")
-
-                temp_raw.unlink()
-
-        self.current_episode_file = temp_file
-
     def monitor_player_position(self):
         if not self.current_player:
             self.player_monitor_timer.stop()
@@ -428,9 +435,8 @@ class SearchUI(QMainWindow):
             self.stop_episode_playback()
 
     def highlight_current_position(self, position: float) -> None:
-        idx = bisect_left(self.episode_start_times, position)
-        if idx >= len(self.episode_start_times):
-            idx = len(self.episode_start_times) - 1
+        idx = bisect_left(self.episode_start_times, position) - 1
+        idx = max(0, min(len(self.episode_start_times)-1, idx))
 
         if self._last_highlighted_idx is not None:
             last_item = self.episode_results.item(self._last_highlighted_idx)
@@ -543,22 +549,9 @@ class SearchUI(QMainWindow):
             self.current_player = None
 
         try:
-            temp_file = self.temp_dir / f"audio_{hash(result.filename + result.start + result.end)}.ogg"
-
-            if not temp_file.exists():
-                audio_data = self.api.get_audio(
-                    result.filename, result.start, result.end)
-                if audio_data:
-                    temp_raw = self.temp_dir / f"raw_{temp_file.name}"
-                    temp_raw.write_bytes(audio_data)
-
-                    audio = AudioSegment.from_ogg(temp_raw)
-                    normalized_audio = audio.normalize()
-                    normalized_audio.export(temp_file, format="ogg")
-
-                    temp_raw.unlink()
-                else:
-                    return
+            temp_file = get_and_normalize_audio(self.api, result.filename, result.start, result.end)
+            if not temp_file:
+                return
 
             self.current_player = Popen(
                 ["mplayer", str(temp_file)],

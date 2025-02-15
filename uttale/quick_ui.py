@@ -516,29 +516,36 @@ class SearchUI(QMainWindow):
                 item = self.episode_results.item(i)
                 item_widget = self.episode_results.itemWidget(item)
                 text_button = item_widget.layout().itemAt(1).widget()
-                text_button.setStyleSheet("text-align: left;")
+                style_default(text_button)
 
     def search_text(self):
         query = self.text_search.text()
         scope = self.scope_search.text()
-
         if not query:
             return
 
         results = self.api.search_text(query, scope)
-
         self.results_list.clear()
+
+        last_button: QWidget | None = None
+        def on_text_button_clicked(button: QPushButton, result: SearchResult) -> None:
+            nonlocal last_button
+            style_default(last_button)
+            style_yellow(button)
+            last_button = button
+            self.show_episode(result)
+
         for result in results:
             item_widget = QWidget()
             item_layout = QHBoxLayout(item_widget)
             item_layout.setContentsMargins(0, 0, 0, 0)
 
             text = (f"{result.text} \n"
-                   f"[{result.start} - {result.end}]")
+                    f"[{result.start} - {result.end}]")
             text_button = QPushButton(text)
-            text_button.setStyleSheet("text-align: left;")
+            style_default(text_button)
             text_button.clicked.connect(
-                lambda checked, r=result: self.show_episode(r))
+                lambda checked, b=text_button, r=result: on_text_button_clicked(b, r))
 
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)

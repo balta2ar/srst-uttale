@@ -13,7 +13,7 @@ from time import perf_counter
 from typing import List, Optional
 from urllib.error import URLError
 from urllib.parse import quote, urlencode
-from urllib.request import urlopen
+from urllib.request import urlopen, urlretrieve
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QKeyEvent
@@ -97,6 +97,13 @@ def timestamp_to_seconds(timestamp: str) -> float:
     m, s = time_parts
     s, ms = s.split(".")
     return int(m) * 60 + int(s) + float(f"0.{ms}")
+
+def ensure_download(scope: str, api: UttaleAPI) -> str:
+    local_path = Path(gettempdir()) / "uttale_audio" / f"{scope}.ogg"
+    local_path.parent.mkdir(exist_ok=True, parents=True)
+    if not local_path.exists():
+        urlretrieve(api.get_audio_url(scope), local_path)
+    return str(local_path)
 
 @dataclass
 class SearchResult:
@@ -374,7 +381,7 @@ class SearchUI(QMainWindow):
             return
 
         scope = item.text()
-        self.current_episode_url = self.api.get_audio_url(scope)
+        self.current_episode_url = ensure_download(scope, self.api)
         results = self.api.search_text("", scope)
 
         self.episode_results.clear()
@@ -440,28 +447,16 @@ class SearchUI(QMainWindow):
             return
 
         self.stop_episode_playback()
+        start_time = timestamp_to_seconds(result.start)
+        cmd = ["mpv", f"--start={start_time}", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", self.current_episode_url]
+        logging.info("cmd: %s", cmd)
+        self.current_player = Popen(
+            cmd, stdin=PIPE, stdout=None, stderr=STDOUT, text=True, bufsize=1,
+        )
 
-        try:
-            start_time = timestamp_to_seconds(result.start)
-
-            url = self.api.get_audio_url(result.filename)
-            cmd = ["mpv", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", url]
-            logging.info("cmd: %s", cmd)
-            self.current_player = Popen(
-                cmd,
-                stdin=PIPE,
-                stdout=None,
-                stderr=STDOUT,
-                text=True,
-                bufsize=1,
-            )
-
-            self.player_start_time = perf_counter() - start_time
-            self.is_player_paused = False
-            self.player_monitor_timer.start()
-
-        except Exception as e:
-            logging.exception(f"Error playing episode: {e}")
+        self.player_start_time = perf_counter() - start_time
+        self.is_player_paused = False
+        self.player_monitor_timer.start()
 
     def stop_episode_playback(self):
         if self.current_player:

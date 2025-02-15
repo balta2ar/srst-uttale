@@ -550,6 +550,7 @@ class SearchUI(QMainWindow):
         self.episode_scope_search.setText(result.filename)
 
         item = QListWidgetItem(result.filename)
+        self.episode_scope_suggestions.clear()
         self.episode_scope_suggestions.addItem(item)
         self.on_episode_scope_selected(item, result.offset(self.api))
 

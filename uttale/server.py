@@ -12,7 +12,7 @@ import duckdb
 import polars as pl
 import uvicorn
 import webvtt
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Response, Header
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -162,21 +162,55 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
     return result
 
-def get_audio_segment(filename: str, start: str, end: str) -> bytes:
+def get_audio_segment(filename: str, start: str, end: str, range_header: str = None) -> tuple[bytes, dict]:
     o = splitext(join(args.root, filename))[0] + ".ogg"
     if not exists(o):
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail=f"File not found: {o}")
+
+    if range_header and (start or end):
+        raise HTTPException(status_code=400, detail="Cannot use both range header and start/end parameters")
+
     try:
+        if range_header:
+            try:
+                bytes_range = range_header.split('=')[1]
+                start_byte, end_byte = map(lambda x: int(x) if x else None, bytes_range.split('-'))
+            except:
+                raise HTTPException(status_code=400, detail="Invalid range header")
+
+            file_size = os.path.getsize(o)
+            if end_byte is None:
+                end_byte = file_size - 1
+            if start_byte is None:
+                start_byte = 0
+
+            if start_byte >= file_size or end_byte >= file_size or start_byte > end_byte:
+                raise HTTPException(status_code=416, detail="Range Not Satisfiable")
+
+            with open(o, 'rb') as f:
+                f.seek(start_byte)
+                data = f.read(end_byte - start_byte + 1)
+
+            headers = {
+                "Content-Range": f"bytes {start_byte}-{end_byte}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(end_byte - start_byte + 1),
+                "Cache-Control": "max-age=86400"
+            }
+            return data, headers
+
         if not start and not end:
             with open(o, 'rb') as f:
-                return f.read()
+                return f.read(), {"Cache-Control": "max-age=86400"}
+
         start_sec = parse_time(start)
         end_sec = parse_time(end)
         duration = end_sec - start_sec
         if duration <= 0:
             raise HTTPException(status_code=400, detail="End time must be greater than start time")
         proc = subprocess.run(["ffmpeg", "-ss", str(start_sec), "-t", str(duration), "-i", o, "-f", "ogg", "pipe:1"], capture_output=True, check=True)
-        return proc.stdout
+        return proc.stdout, {"Cache-Control": "max-age=86400"}
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid time format") from e
     except FileNotFoundError as e:
@@ -188,17 +222,11 @@ def get_audio_segment(filename: str, start: str, end: str) -> bytes:
 def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks) -> Play:
     """Play audio segment"""
     result = Play(filename=filename, start=start, end=end)
-    try:
-        audio_data = get_audio_segment(filename, start, end)
-    except HTTPException as e:
-        raise e
+    audio_data, _ = get_audio_segment(filename, start, end)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
         tmp.write(audio_data)
         tmp_path = tmp.name
-    try:
-        subprocess.Popen(["play", tmp_path])
-    except:
-        raise HTTPException(status_code=500, detail="Audio playback failed")
+    subprocess.Popen(["play", tmp_path])
     def cleanup(tmp_file):
         try:
             time.sleep(5)
@@ -211,14 +239,11 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
     return result
 
 @app.get("/uttale/Audio")
-def audio_endpoint(filename: str, start: str, end: str):
+def audio_endpoint(filename: str, start: str, end: str, range: str = Header(None)) -> Response:
     """Extract audio segment"""
-    try:
-        audio_data = get_audio_segment(filename, start, end)
-    except HTTPException as e:
-        raise e
-    headers = {"Cache-Control": "max-age=86400"}
-    return Response(content=audio_data, media_type="application/octet-stream", headers=headers)
+    audio_data, headers = get_audio_segment(filename, start, end, range)
+    status_code = 206 if range else 200
+    return Response(content=audio_data, media_type="application/octet-stream", headers=headers, status_code=status_code)
 
 @app.post("/uttale/Reindex", response_model=Reindex)
 def trigger_reindex(background_tasks: BackgroundTasks) -> Reindex:

@@ -3,20 +3,18 @@
 import logging
 from bisect import bisect_left
 from dataclasses import dataclass
-from hashlib import blake2b
 from json import dumps, loads
 from os import environ
 from pathlib import Path
-from subprocess import DEVNULL, PIPE, Popen
+from subprocess import PIPE, STDOUT, Popen
 from sys import argv, exit
 from tempfile import gettempdir
 from time import perf_counter
-from typing import List, Optional, Union
+from typing import List, Optional
 from urllib.error import URLError
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
-from pydub import AudioSegment
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -57,7 +55,7 @@ class UttaleAPI:
                 response_time = perf_counter() - start_time
 
                 response_json = loads(data.decode())
-                self.logger.info(f"Received in {response_time:.3f}s: {response_json}")
+                self.logger.info(f"Received in {response_time:.3f}s: {len(response_json)}")
                 return response_json
 
         except URLError as e:
@@ -83,46 +81,11 @@ class UttaleAPI:
             return [SearchResult(**item) for item in result["results"]]
         return []
 
-    def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
-        url = (f"{self.base_url}/uttale/Audio?"
-            f"filename={quote(filename)}&"
-            f"start={quote(start)}&"
-            f"end={quote(end)}")
-
-        try:
-            self.logger.info(url)
-            start_time = perf_counter()
-
-            with urlopen("http://" + url.split("://")[1]) as response:
-                data = response.read()
-                response_time = perf_counter() - start_time
-
-                size_kb = len(data) / 1024
-                self.logger.info("Received %.1fKB of audio data in %.3fs", size_kb, response_time)
-                return data
-
-        except URLError as e:
-            self.logger.exception("Audio fetch error: %s", e)
-            return b""
-
-def get_and_normalize_audio(api, filename: str, start: str = "", end: str = "") -> Union[Path, None]:
-    def make_temp_path(content: str) -> Path:
-        h = blake2b(digest_size=16)
-        h.update(content.encode())
-        return Path(gettempdir()) / "uttale_audio" / f"audio_{h.hexdigest()}.ogg"
-
-    temp_file = make_temp_path(f"{filename}{start}{end}")
-    if not temp_file.exists():
-        audio_data = api.get_audio(filename, start, end)
-        temp_raw = make_temp_path(f"raw_{filename}{start}{end}")
-        temp_raw.write_bytes(audio_data)
-
-        audio = AudioSegment.from_ogg(temp_raw)
-        normalized_audio = audio.normalize()
-        normalized_audio.export(temp_file, format="ogg")
-
-        temp_raw.unlink()
-    return temp_file
+    def get_audio_url(self, filename: str, start: str = "", end: str = "") -> str:
+        return (f"{self.base_url}/uttale/Audio?"
+            f"filename={filename}&"
+            f"start={start}&"
+            f"end={end}")
 
 def timestamp_to_seconds(timestamp: str) -> float:
     time_parts = timestamp.split(":")
@@ -250,12 +213,12 @@ class SearchUI(QMainWindow):
             return
 
         if self.is_player_paused:
-            self.current_player.stdin.write("pause\n")
+            self.current_player.stdin.write("cycle pause\n")
             self.player_start_time = perf_counter() - self.pause_position
             self.is_player_paused = False
         else:
             self.pause_position = perf_counter() - self.player_start_time
-            self.current_player.stdin.write("pause\n")
+            self.current_player.stdin.write("cycle pause\n")
             self.is_player_paused = True
         self.current_player.stdin.flush()
 
@@ -310,7 +273,7 @@ class SearchUI(QMainWindow):
         self.episode_scope_timer.timeout.connect(self.search_episode_scopes)
 
         self.current_player = None
-        self.current_episode_file = None
+        self.current_episode_url = None
         self.player_monitor_timer = QTimer()
         self.player_monitor_timer.setInterval(100)
         self.player_monitor_timer.timeout.connect(self.monitor_player_position)
@@ -411,7 +374,7 @@ class SearchUI(QMainWindow):
             return
 
         scope = item.text()
-        self.current_episode_file = get_and_normalize_audio(self.api, scope)
+        self.current_episode_url = self.api.get_audio_url(scope)
         results = self.api.search_text("", scope)
 
         self.episode_results.clear()
@@ -473,7 +436,7 @@ class SearchUI(QMainWindow):
         self._last_highlighted_idx = idx
 
     def play_episode_from(self, result: SearchResult):
-        if not self.current_episode_file:
+        if not self.current_episode_url:
             return
 
         self.stop_episode_playback()
@@ -481,11 +444,14 @@ class SearchUI(QMainWindow):
         try:
             start_time = timestamp_to_seconds(result.start)
 
+            url = self.api.get_audio_url(result.filename)
+            cmd = ["mpv", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", url]
+            logging.info("cmd: %s", cmd)
             self.current_player = Popen(
-                ["mplayer", "-slave", "-quiet", str(self.current_episode_file), "-ss", str(start_time)],
+                cmd,
                 stdin=PIPE,
-                stdout=PIPE,
-                stderr=DEVNULL,
+                stdout=None,
+                stderr=STDOUT,
                 text=True,
                 bufsize=1,
             )
@@ -561,15 +527,20 @@ class SearchUI(QMainWindow):
             self.player_start_time = None
 
         try:
-            temp_file = get_and_normalize_audio(self.api, result.filename, result.start, result.end)
+            url = self.api.get_audio_url(result.filename, result.start, result.end)
+            cmd = ["mpv", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", url]
+            logging.info("cmd: %s", cmd)
             self.current_player = Popen(
-                ["mplayer", str(temp_file)],
-                stdout=DEVNULL,
-                stderr=DEVNULL,
+                cmd,
+                stdin=PIPE,
+                stdout=None,
+                stderr=STDOUT,
+                text=True,
+                bufsize=1
             )
 
         except Exception as e:
-            print(f"Error playing audio: {e}")
+            logging.exception(f"Error playing audio: {e}")
 
     def closeEvent(self, event):
         if self.current_player:

@@ -136,7 +136,14 @@ def ensure_download(scope: str, api: UttaleAPI) -> str:
         logging.info(f"Downloaded {scope} in {elapsed_time:.2f} seconds")
     return str(local_path)
 
-def start_player(self: 'SearchUI', start_time: Optional[float], url: str) -> Popen[str]:
+def style_default(button: QWidget | None) -> None:
+    if button: button.setStyleSheet("text-align: left;")
+def style_yellow(button: QWidget) -> None:
+    if button: button.setStyleSheet("text-align: left; background-color: yellow;")
+def style_green(button: QWidget) -> None:
+    if button: button.setStyleSheet("text-align: left; background-color: lightgreen;")
+
+def start_player(self: "SearchUI", start_time: Optional[float], url: str) -> Popen[str]:
     cmd = ["mpv",
         "--no-video",
         "--idle=yes",
@@ -262,6 +269,7 @@ class SearchUI(QMainWindow):
 
         self.episode_scope_search.textChanged.connect(self.on_episode_scope_search_changed)
         self.episode_scope_suggestions.itemClicked.connect(self.on_episode_scope_selected)
+        self.episode_scope_suggestions.itemDoubleClicked.connect(self.on_episode_scope_double_clicked)
 
         for widget in [main_widget, self.scope_search, self.text_search, self.episode_scope_search]:
             widget.installEventFilter(self)
@@ -426,6 +434,9 @@ class SearchUI(QMainWindow):
         self.scope_search.setText(item.text())
         self.scope_suggestions.hide()
         self.search_text()
+
+    def on_episode_scope_double_clicked(self, item: QListWidgetItem) -> None:
+        self.episode_scope_search.setText(item.text())
 
     def on_episode_scope_selected(self, item: QListWidgetItem, index: int = -1) -> None:
         if not item:

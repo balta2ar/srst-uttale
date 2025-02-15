@@ -1,4 +1,5 @@
 import argparse
+import logging
 import multiprocessing as mp
 import os
 import subprocess
@@ -12,7 +13,7 @@ import duckdb
 import polars as pl
 import uvicorn
 import webvtt
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -44,6 +45,15 @@ class StatusResponse(BaseModel):
 
 app = FastAPI()
 db_duckdb = None
+
+logging.basicConfig(level=logging.DEBUG)
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    headers = dict(request.headers)
+    logging.debug(f"Incoming Request: {request.method} {request.url}")
+    logging.debug(f"Headers: {headers}")
+    return await call_next(request)
 
 def init_database():
     """Initialize the database and create tables"""
@@ -240,10 +250,10 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
 
 @app.head("/uttale/Audio")
 @app.get("/uttale/Audio")
-def audio_endpoint(filename: str, start: str, end: str, range: str = Header(None)) -> Response:
+def audio_endpoint(filename: str, start: str, end: str, range_header: str = Header(None)) -> Response:
     """Extract audio segment"""
-    audio_data, headers = get_audio_segment(filename, start, end, range)
-    status_code = 206 if range else 200
+    audio_data, headers = get_audio_segment(filename, start, end, range_header)
+    status_code = 206 if range_header else 200
     return Response(content=audio_data, media_type="application/octet-stream", headers=headers, status_code=status_code)
 
 @app.post("/uttale/Reindex", response_model=Reindex)

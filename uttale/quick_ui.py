@@ -538,17 +538,8 @@ class SearchUI(QMainWindow):
         self.tab_widget.setCurrentIndex(1)
         self.episode_scope_search.setText(result.filename)
 
-        suggestions = [
-            self.episode_scope_suggestions.item(i).text()
-            for i in range(self.episode_scope_suggestions.count())
-        ]
-
-        if result.filename not in suggestions:
-            item = QListWidgetItem(result.filename)
-            self.episode_scope_suggestions.addItem(item)
-        else:
-            item = self.episode_scope_suggestions.findItems(result.filename, Qt.MatchFlag.MatchExactly)[0]
-
+        item = QListWidgetItem(result.filename)
+        self.episode_scope_suggestions.addItem(item)
         self.on_episode_scope_selected(item)
 
         for i in range(self.episode_results.count()):

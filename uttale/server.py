@@ -138,7 +138,8 @@ def scopes(q: str = "", limit: int = 100) -> Scopes:
     """Search for scopes in the database"""
     result = Scopes(q=q, limit=limit)
     try:
-        cursor = db_duckdb.execute("SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?", (f"%{q}%", limit)).fetchall()
+        query = q.replace(" ", "%")
+        cursor = db_duckdb.execute("SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?", (f"%{query}%", limit)).fetchall()
         result.results = [row[0] for row in cursor]
         result.results_count = len(result.results)
     except:
@@ -150,9 +151,11 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
     """Search for text in the database given a scope"""
     result = Search(q=q, scope=scope, limit=limit)
     try:
+        query = q.replace(" ", "%")
+        scope_query = scope.replace(" ", "%")
         cursor = db_duckdb.execute(
             "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
-            (f"%{q}%", f"%{scope}%", limit)).fetchall()
+            (f"%{query}%", f"%{scope_query}%", limit)).fetchall()
         result.results = [{"filename": row[0], "text": row[3], "start": row[1], "end": row[2]} for row in cursor]
         result.results_count = len(result.results)
     except:

@@ -406,7 +406,7 @@ class SearchUI(QMainWindow):
         self.scope_suggestions.hide()
         self.search_text()
 
-    def on_episode_scope_selected(self, item: QListWidgetItem, index: int = 0) -> None:
+    def on_episode_scope_selected(self, item: QListWidgetItem, index: int = -1) -> None:
         if not item:
             return
 

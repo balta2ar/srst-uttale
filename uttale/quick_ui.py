@@ -442,6 +442,7 @@ class SearchUI(QMainWindow):
 
             if len(self.episode_start_times) - 1 == index:
                 self.episode_results.scrollToItem(item)
+                text_button.setStyleSheet("text-align: left; background-color: yellow;")
 
     def monitor_player_position(self):
         if not self.current_player or not self.player_start_time:
@@ -468,7 +469,7 @@ class SearchUI(QMainWindow):
 
         item = self.episode_results.item(idx)
         widget = self.episode_results.itemWidget(item)
-        widget.layout().itemAt(1).widget().setStyleSheet("text-align: left; background-color: #90EE90;")
+        widget.layout().itemAt(1).widget().setStyleSheet("text-align: left; background-color: lightgreen;")
         self._last_highlighted_idx = idx
 
     def play_episode_from(self, result: SearchResult):

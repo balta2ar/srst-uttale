@@ -12,7 +12,7 @@ import duckdb
 import polars as pl
 import uvicorn
 import webvtt
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Response, Header
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -238,6 +238,7 @@ def play(filename: str, start: str, end: str, background_tasks: BackgroundTasks)
     result.status = "playing"
     return result
 
+@app.head("/uttale/Audio")
 @app.get("/uttale/Audio")
 def audio_endpoint(filename: str, start: str, end: str, range: str = Header(None)) -> Response:
     """Extract audio segment"""

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import logging
+import socket
 from bisect import bisect_left
 from dataclasses import dataclass
 from json import dumps, loads
@@ -12,7 +13,7 @@ from tempfile import gettempdir
 from time import perf_counter
 from typing import List, Optional
 from urllib.error import URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 from urllib.request import urlopen, urlretrieve
 
 from PyQt6.QtCore import Qt, QTimer
@@ -35,6 +36,29 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+class MPV:
+    def __init__(self, socket_path: str):
+        self.socket_path = socket_path
+        self.logger = logging.getLogger("MPV")
+
+    def _send_command(self, command: dict) -> None:
+        try:
+            sock = socket.socket(socket.AF_UNIX)
+            sock.connect(self.socket_path)
+            sock.send(dumps(command).encode() + b'\n')
+            sock.close()
+        except Exception as e:
+            self.logger.exception("Failed to send command to mpv")
+
+    def pause(self) -> None:
+        self._send_command({"command": ["set_property", "pause", True]})
+
+    def resume(self) -> None:
+        self._send_command({"command": ["set_property", "pause", False]})
+
+    def quit(self) -> None:
+        self._send_command({"command": ["quit"]})
 
 class UttaleAPI:
     def __init__(self, base_url: str):
@@ -102,8 +126,26 @@ def ensure_download(scope: str, api: UttaleAPI) -> str:
     local_path = Path(gettempdir()) / "uttale_audio" / f"{scope}.ogg"
     local_path.parent.mkdir(exist_ok=True, parents=True)
     if not local_path.exists():
+        start_time = perf_counter()
         urlretrieve(api.get_audio_url(scope), local_path)
+        elapsed_time = perf_counter() - start_time
+        logging.info(f"Downloaded {scope} in {elapsed_time:.2f} seconds")
     return str(local_path)
+
+def start_player(self: 'SearchUI', start_time: Optional[float], url: str) -> Popen[str]:
+    cmd = ["mpv",
+        "--no-video",
+        "--idle=yes",
+        "--force-window=no",
+        "--no-terminal",
+        "--af=loudnorm",
+        "--af=dynaudnorm", f"--input-ipc-server={self.mpv_socket}", url]
+    if start_time:
+        cmd.insert(1, f"--start={start_time}")
+    logging.info("cmd: %s", cmd)
+    return Popen(
+        cmd, stdin=PIPE, stdout=None, stderr=STDOUT, text=True, bufsize=1,
+    )
 
 @dataclass
 class SearchResult:
@@ -125,6 +167,8 @@ class SearchUI(QMainWindow):
         super().__init__()
         base_url = environ.get("UTTALE_API", "http://localhost:7010")
         self.api = UttaleAPI(base_url)
+        self.mpv_socket = "/tmp/mpvsocket"
+        self.mpv = MPV(self.mpv_socket)
 
         self.setWindowTitle("Uttale")
         self.setObjectName("Uttale")
@@ -220,14 +264,13 @@ class SearchUI(QMainWindow):
             return
 
         if self.is_player_paused:
-            self.current_player.stdin.write("cycle pause\n")
+            self.mpv.resume()
             self.player_start_time = perf_counter() - self.pause_position
             self.is_player_paused = False
         else:
+            self.mpv.pause()
             self.pause_position = perf_counter() - self.player_start_time
-            self.current_player.stdin.write("cycle pause\n")
             self.is_player_paused = True
-        self.current_player.stdin.flush()
 
     def eventFilter(self, obj, event):
         if event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -448,11 +491,7 @@ class SearchUI(QMainWindow):
 
         self.stop_episode_playback()
         start_time = timestamp_to_seconds(result.start)
-        cmd = ["mpv", f"--start={start_time}", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", self.current_episode_url]
-        logging.info("cmd: %s", cmd)
-        self.current_player = Popen(
-            cmd, stdin=PIPE, stdout=None, stderr=STDOUT, text=True, bufsize=1,
-        )
+        self.currrent_player = start_player(self, start_time, self.current_episode_url)
 
         self.player_start_time = perf_counter() - start_time
         self.is_player_paused = False
@@ -460,6 +499,7 @@ class SearchUI(QMainWindow):
 
     def stop_episode_playback(self):
         if self.current_player:
+            self.mpv.quit()
             self.current_player.terminate()
             self.current_player = None
             self.player_start_time = None
@@ -523,16 +563,7 @@ class SearchUI(QMainWindow):
 
         try:
             url = self.api.get_audio_url(result.filename, result.start, result.end)
-            cmd = ["mpv", "--no-terminal", "--af=loudnorm", "--af=dynaudnorm", "--input-ipc-server=/tmp/mpvsocket", url]
-            logging.info("cmd: %s", cmd)
-            self.current_player = Popen(
-                cmd,
-                stdin=PIPE,
-                stdout=None,
-                stderr=STDOUT,
-                text=True,
-                bufsize=1
-            )
+            self.current_player = start_player(self, 0, url)
 
         except Exception as e:
             logging.exception(f"Error playing audio: {e}")

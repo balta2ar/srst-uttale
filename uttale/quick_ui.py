@@ -13,11 +13,13 @@ from subprocess import PIPE, STDOUT, Popen, run
 from sys import argv, exit
 from tempfile import gettempdir
 from time import perf_counter
-from typing import List, Optional
+from typing import Callable, List, Optional
 from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen, urlretrieve
 
+from diskcache import Cache
+from line_profiler import profile
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor, QFont, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -38,6 +40,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger("general")
+cache = Cache(Path(gettempdir()) / "uttale_audio" / "cache")
+ONE_WEEK = 60 * 60 * 24 * 7
 
 class MPV:
     def __init__(self, socket_path: str):
@@ -69,6 +74,7 @@ class UttaleAPI:
         self.base_url = base_url.rstrip("/")
         self.logger = logging.getLogger("UttaleAPI")
 
+    @cache.memoize(typed=True, expire=ONE_WEEK)
     def _make_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
         try:
             url = f"{self.base_url}{endpoint}"
@@ -133,7 +139,7 @@ def ensure_download(scope: str, api: UttaleAPI) -> str:
         start_time = perf_counter()
         urlretrieve(api.get_audio_url(scope), local_path)
         elapsed_time = perf_counter() - start_time
-        logging.info(f"Downloaded {scope} in {elapsed_time:.2f} seconds")
+        logger.info(f"Downloaded {scope} in {elapsed_time:.2f} seconds")
     return str(local_path)
 
 def style_default(button: QWidget | None) -> None:
@@ -158,7 +164,7 @@ def start_player(self: "SearchUI", start_time: Optional[float], url: str) -> Pop
         f"--input-ipc-server={self.mpv_socket}", url]
     if start_time:
         cmd.insert(1, f"--start={start_time}")
-    logging.info("cmd: %s", " ".join(cmd))
+    logger.info("cmd: %s", " ".join(cmd))
     return Popen(
         cmd, stdin=PIPE, stderr=STDOUT, text=True, bufsize=1,
     )
@@ -441,24 +447,28 @@ class SearchUI(QMainWindow):
     def on_episode_scope_double_clicked(self, item: QListWidgetItem) -> None:
         self.episode_scope_search.setText(item.text())
 
-    def on_episode_scope_selected(self, item: QListWidgetItem, index: int = -1) -> None:
-        if not item:
+    @profile
+    def on_episode_scope_selected(self, scope_item: QListWidgetItem, index: int = -1) -> None:
+        if not scope_item:
             return
 
-        scope = item.text()
+        t0 = perf_counter()
+        scope = scope_item.text()
         self.current_episode_url = ensure_download(scope, self.api)
         results = self.api.search_text("", scope)
+        logger.info("Search text in %s: %.3f", scope, perf_counter() - t0)
+        t1 = perf_counter()
 
         self.episode_results.clear()
         self.episode_start_times = []
 
-        for result in results:
+        for i, result in enumerate(results):
             item_widget = QWidget()
             item_layout = QHBoxLayout(item_widget)
             item_layout.setContentsMargins(0, 0, 0, 0)
 
             text = (f"{result.text} \n"
-                   f"[{result.start} - {result.end}]")
+                f"[{result.start} - {result.end}]")
             text_button = QPushButton(text)
             style_default(text_button)
 
@@ -479,6 +489,8 @@ class SearchUI(QMainWindow):
                 self.episode_results.scrollToItem(item)
                 text_button.setStyleSheet("text-align: left; background-color: yellow;")
 
+        logger.info("Populate episode results in %.3f", perf_counter() - t1)
+
     def monitor_player_position(self):
         if not self.current_player or not self.player_start_time:
             self.player_monitor_timer.stop()
@@ -490,7 +502,7 @@ class SearchUI(QMainWindow):
                 self.highlight_current_position(position)
 
         except Exception as e:
-            logging.exception(f"Error monitoring player: {e}")
+            logger.exception(f"Error monitoring player: {e}")
             self.stop_episode_playback()
 
     def highlight_current_position(self, position: float) -> None:
@@ -596,7 +608,7 @@ class SearchUI(QMainWindow):
             self.is_player_paused = False
 
         except Exception as e:
-            logging.exception(f"Error playing audio: {e}")
+            logger.exception(f"Error playing audio: {e}")
 
     def closeEvent(self, event):
         if self.current_player:

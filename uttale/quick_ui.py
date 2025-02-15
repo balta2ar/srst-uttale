@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from json import dumps, loads
 from os import environ
 from pathlib import Path
-from subprocess import PIPE, STDOUT, Popen
+from subprocess import PIPE, STDOUT, Popen, run
 from sys import argv, exit
 from tempfile import gettempdir
 from time import perf_counter
@@ -59,6 +59,8 @@ class MPV:
 
     def quit(self) -> None:
         self._send_command({"command": ["quit"]})
+        # Force kill any remaining mpv processes
+        run(["pkill", "mpv"])
 
 class UttaleAPI:
     def __init__(self, base_url: str):
@@ -183,6 +185,7 @@ class SearchUI(QMainWindow):
         self.load_saved_state()
         self._last_highlighted_idx = None
         self.player_start_time = None
+        self.pause_position = None
         self.is_player_paused = False
 
     def setup_ui(self):
@@ -265,11 +268,12 @@ class SearchUI(QMainWindow):
 
         if self.is_player_paused:
             self.mpv.resume()
-            self.player_start_time = perf_counter() - self.pause_position
+            self.player_start_time = perf_counter() - (self.pause_position or 0)
             self.is_player_paused = False
         else:
             self.mpv.pause()
-            self.pause_position = perf_counter() - self.player_start_time
+            if self.player_start_time:
+                self.pause_position = perf_counter() - self.player_start_time
             self.is_player_paused = True
 
     def eventFilter(self, obj, event):
@@ -491,7 +495,7 @@ class SearchUI(QMainWindow):
 
         self.stop_episode_playback()
         start_time = timestamp_to_seconds(result.start)
-        self.currrent_player = start_player(self, start_time, self.current_episode_url)
+        self.current_player = start_player(self, start_time, self.current_episode_url)
 
         self.player_start_time = perf_counter() - start_time
         self.is_player_paused = False
@@ -503,6 +507,7 @@ class SearchUI(QMainWindow):
             self.current_player.terminate()
             self.current_player = None
             self.player_start_time = None
+            self.pause_position = None
             self.player_monitor_timer.stop()
 
             for i in range(self.episode_results.count()):
@@ -557,34 +562,26 @@ class SearchUI(QMainWindow):
 
     def play_audio(self, result: SearchResult):
         if self.current_player:
-            self.current_player.terminate()
-            self.current_player = None
-            self.player_start_time = None
+            self.stop_episode_playback()
 
         try:
             url = self.api.get_audio_url(result.filename, result.start, result.end)
             self.current_player = start_player(self, 0, url)
+            self.player_start_time = perf_counter()
+            self.is_player_paused = False
 
         except Exception as e:
             logging.exception(f"Error playing audio: {e}")
 
     def closeEvent(self, event):
         if self.current_player:
+            self.mpv.quit()
             self.current_player.terminate()
             self.current_player = None
             self.player_start_time = None
+            self.pause_position = None
 
         self.save_state()
-        for file in self.temp_dir.glob("audio_*.wav"):
-            try:
-                file.unlink()
-            except:
-                pass
-        try:
-            self.temp_dir.rmdir()
-        except:
-            pass
-
         super().closeEvent(event)
 
 def main():

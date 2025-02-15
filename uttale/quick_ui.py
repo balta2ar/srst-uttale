@@ -151,7 +151,10 @@ def start_player(self: "SearchUI", start_time: Optional[float], url: str) -> Pop
         "--no-terminal",
         # both seem to work fine
         # "--af=lavfi=[loudnorm=i=-14.0:lra=13.0:tp=-1.0]", # https://old.reddit.com/r/mpv/comments/xf8p9t/movie_volume_compression/
-        "--af=lavfi=[loudnorm=I=-16:TP=-3:LRA=4]", # https://old.reddit.com/r/mpv/comments/yk7d63/good_method_to_normalise_audio_in_mpv/
+        "--af=lavfi=[loudnorm=I=-14:TP=-3:LRA=7]", # https://old.reddit.com/r/mpv/comments/yk7d63/good_method_to_normalise_audio_in_mpv/
+        # "--af=lavfi=[loudnorm=I=-16:LRA=11:TP=-1.5]", # https://bbs.archlinux.org/viewtopic.php?pid=1995208#p1995208
+        # I: -14 (louder)..-16
+        # LRA: 13..11 (more dynamic)..9
         f"--input-ipc-server={self.mpv_socket}", url]
     if start_time:
         cmd.insert(1, f"--start={start_time}")

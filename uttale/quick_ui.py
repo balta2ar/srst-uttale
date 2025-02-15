@@ -38,6 +38,73 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 
+class UttaleAPI:
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip("/")
+        self.logger = logging.getLogger("UttaleAPI")
+
+    def _make_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
+        try:
+            url = f"{self.base_url}{endpoint}"
+            if params:
+                url += "?" + urlencode(params)
+
+            self.logger.info(url)
+            start_time = perf_counter()
+
+            with urlopen(url) as response:
+                data = response.read()
+                response_time = perf_counter() - start_time
+
+                response_json = loads(data.decode())
+                self.logger.info(f"Received in {response_time:.3f}s: {response_json}")
+                return response_json
+
+        except URLError as e:
+            self.logger.error(f"API Error: {e}")
+            return None
+
+    def search_scopes(self, query: str, limit: int = 1000) -> List[str]:
+        result = self._make_request("/uttale/Scopes", {
+            "q": query,
+            "limit": limit,
+        })
+        if result and isinstance(result.get("results"), list):
+            return result["results"]
+        return []
+
+    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List['SearchResult']:
+        result = self._make_request("/uttale/Search", {
+            "q": query,
+            "scope": scope,
+            "limit": limit,
+        })
+        if result and isinstance(result.get("results"), list):
+            return [SearchResult(**item) for item in result["results"]]
+        return []
+
+    def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
+        url = (f"{self.base_url}/uttale/Audio?"
+            f"filename={quote(filename)}&"
+            f"start={quote(start)}&"
+            f"end={quote(end)}")
+
+        try:
+            self.logger.info(url)
+            start_time = perf_counter()
+
+            with urlopen("http://" + url.split("://")[1]) as response:
+                data = response.read()
+                response_time = perf_counter() - start_time
+
+                size_kb = len(data) / 1024
+                self.logger.info("Received %.1fKB of audio data in %.3fs", size_kb, response_time)
+                return data
+
+        except URLError as e:
+            self.logger.exception("Audio fetch error: %s", e)
+            return b""
+
 def get_and_normalize_audio(api, filename: str, start: str = "", end: str = "") -> Union[Path, None]:
     def make_temp_path(content: str) -> Path:
         h = blake2b(digest_size=16)
@@ -74,73 +141,14 @@ class SearchResult:
     text: str
     start: str
     end: str
-
-class UttaleAPI:
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip("/")
-        self.logger = logging.getLogger("UttaleAPI")
-
-    def _make_request(self, endpoint: str, params: Optional[dict] = None) -> dict:
-        try:
-            url = f"{self.base_url}{endpoint}"
-            if params:
-                url += "?" + urlencode(params)
-
-            self.logger.info(url)
-            start_time = perf_counter()
-
-            with urlopen(url) as response:
-                data = response.read()
-                response_time = perf_counter() - start_time
-
-                response_json = loads(data.decode())
-                self.logger.info(f"Received in {response_time:.3f}s: {response_json}")
-                return response_json
-
-        except URLError as e:
-            self.logger.error(f"API Error: {e}")
-            return None
-
-    def search_scopes(self, query: str, limit: int = 1000) -> List[str]:
-        result = self._make_request("/uttale/Scopes", {
-            "q": query,
-            "limit": limit,
-        })
-        if result and isinstance(result.get("results"), list):
-            return result["results"]
-        return []
-
-    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List[SearchResult]:
-        result = self._make_request("/uttale/Search", {
-            "q": query,
-            "scope": scope,
-            "limit": limit,
-        })
-        if result and isinstance(result.get("results"), list):
-            return [SearchResult(**item) for item in result["results"]]
-        return []
-
-    def get_audio(self, filename: str, start: str = "", end: str = "") -> bytes:
-        url = (f"{self.base_url}/uttale/Audio?"
-            f"filename={quote(filename)}&"
-            f"start={quote(start)}&"
-            f"end={quote(end)}")
-
-        try:
-            self.logger.info(url)
-            start_time = perf_counter()
-
-            with urlopen("http://" + url.split("://")[1]) as response:
-                data = response.read()
-                response_time = perf_counter() - start_time
-
-                size_kb = len(data) / 1024
-                self.logger.info("Received %.1fKB of audio data in %.3fs", size_kb, response_time)
-                return data
-
-        except URLError as e:
-            self.logger.exception("Audio fetch error: %s", e)
-            return b""
+    def offset(self, api: UttaleAPI) -> int:
+        # TODO: this is not efficient to send a new request for each offset,
+        # it's server that should return the offset in search results
+        results = api.search_text(query="", scope=self.filename)
+        for i, result in enumerate(results):
+            if result.start == self.start:
+                return i
+        return 0
 
 class SearchUI(QMainWindow):
     def __init__(self):
@@ -398,7 +406,7 @@ class SearchUI(QMainWindow):
         self.scope_suggestions.hide()
         self.search_text()
 
-    def on_episode_scope_selected(self, item) -> None:
+    def on_episode_scope_selected(self, item: QListWidgetItem, index: int = 0) -> None:
         if not item:
             return
 
@@ -429,9 +437,11 @@ class SearchUI(QMainWindow):
 
             self.episode_start_times.append(timestamp_to_seconds(result.start))
             self.episode_results.addItem("")
-            self.episode_results.setItemWidget(
-                self.episode_results.item(self.episode_results.count()-1),
-                item_widget)
+            item = self.episode_results.item(self.episode_results.count()-1)
+            self.episode_results.setItemWidget(item, item_widget)
+
+            if len(self.episode_start_times) - 1 == index:
+                self.episode_results.scrollToItem(item)
 
     def monitor_player_position(self):
         if not self.current_player or not self.player_start_time:
@@ -540,15 +550,7 @@ class SearchUI(QMainWindow):
 
         item = QListWidgetItem(result.filename)
         self.episode_scope_suggestions.addItem(item)
-        self.on_episode_scope_selected(item)
-
-        for i in range(self.episode_results.count()):
-            item = self.episode_results.item(i)
-            item_widget = self.episode_results.itemWidget(item)
-            text_button = item_widget.layout().itemAt(1).widget()
-            if text_button.text() == f"{result.text}\n[{result.start} - {result.end}]":
-                self.episode_results.scrollToItem(item)
-                break
+        self.on_episode_scope_selected(item, result.offset(self.api))
 
     def play_audio(self, result: SearchResult):
         if self.current_player:

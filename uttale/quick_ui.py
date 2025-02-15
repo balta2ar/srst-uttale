@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import logging
 import socket
 from bisect import bisect_left
@@ -46,9 +48,9 @@ class MPV:
         try:
             sock = socket.socket(socket.AF_UNIX)
             sock.connect(self.socket_path)
-            sock.send(dumps(command).encode() + b'\n')
+            sock.send(dumps(command).encode() + b"\n")
             sock.close()
-        except Exception as e:
+        except Exception:
             self.logger.exception("Failed to send command to mpv")
 
     def pause(self) -> None:
@@ -60,7 +62,7 @@ class MPV:
     def quit(self) -> None:
         self._send_command({"command": ["quit"]})
         # Force kill any remaining mpv processes
-        run(["pkill", "mpv"])
+        run(["pkill", "mpv"], check=False)
 
 class UttaleAPI:
     def __init__(self, base_url: str):
@@ -97,7 +99,7 @@ class UttaleAPI:
             return result["results"]
         return []
 
-    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List['SearchResult']:
+    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List["SearchResult"]:
         result = self._make_request("/uttale/Search", {
             "q": query,
             "scope": scope,
@@ -444,7 +446,7 @@ class SearchUI(QMainWindow):
             text = (f"{result.text} \n"
                    f"[{result.start} - {result.end}]")
             text_button = QPushButton(text)
-            text_button.setStyleSheet("text-align: left;")
+            style_default(text_button)
 
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)
@@ -484,11 +486,11 @@ class SearchUI(QMainWindow):
         if self._last_highlighted_idx is not None:
             last_item = self.episode_results.item(self._last_highlighted_idx)
             last_widget = self.episode_results.itemWidget(last_item)
-            last_widget.layout().itemAt(1).widget().setStyleSheet("text-align: left;")
+            style_default(last_widget.layout().itemAt(1).widget())
 
         item = self.episode_results.item(idx)
         widget = self.episode_results.itemWidget(item)
-        widget.layout().itemAt(1).widget().setStyleSheet("text-align: left; background-color: lightgreen;")
+        style_green(widget.layout().itemAt(1).widget())
         self._last_highlighted_idx = idx
 
     def play_episode_from(self, result: SearchResult):

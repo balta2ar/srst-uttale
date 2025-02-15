@@ -140,13 +140,15 @@ def start_player(self: 'SearchUI', start_time: Optional[float], url: str) -> Pop
         "--idle=yes",
         "--force-window=no",
         "--no-terminal",
-        "--af=loudnorm",
-        "--af=dynaudnorm", f"--input-ipc-server={self.mpv_socket}", url]
+        # both seem to work fine
+        # "--af=lavfi=[loudnorm=i=-14.0:lra=13.0:tp=-1.0]", # https://old.reddit.com/r/mpv/comments/xf8p9t/movie_volume_compression/
+        "--af=lavfi=[loudnorm=I=-16:TP=-3:LRA=4]", # https://old.reddit.com/r/mpv/comments/yk7d63/good_method_to_normalise_audio_in_mpv/
+        f"--input-ipc-server={self.mpv_socket}", url]
     if start_time:
         cmd.insert(1, f"--start={start_time}")
-    logging.info("cmd: %s", cmd)
+    logging.info("cmd: %s", " ".join(cmd))
     return Popen(
-        cmd, stdin=PIPE, stdout=None, stderr=STDOUT, text=True, bufsize=1,
+        cmd, stdin=PIPE, stderr=STDOUT, text=True, bufsize=1,
     )
 
 @dataclass

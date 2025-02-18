@@ -1,6 +1,7 @@
 let currentVtt = null;
 let currentSubtitle = null;
 let subtitleData = null;
+let currentFileName = null;
 const player = document.getElementById('player');
 const searchInput = document.getElementById('search');
 const fileList = document.getElementById('fileList');
@@ -21,17 +22,19 @@ async function searchFiles(query) {
 
 function displayFiles(files) {
     fileList.innerHTML = files.map(file => 
-        `<div class="file" onclick="loadVtt('${file}')">${file}</div>`
+        `<div class="file ${file === currentFileName ? 'active' : ''}" onclick="loadVtt('${file}')">${file}</div>`
     ).join('');
 }
 
 async function loadVtt(filename) {
+    currentFileName = filename;
     const response = await fetch(`/vtt/${filename}`);
     const text = await response.text();
     currentVtt = text;
     subtitleData = parseVtt(text);
     displaySubtitles(subtitleData);
     player.src = `/audio/${filename.replace('.vtt', '.ogg')}`;
+    displayFiles(await (await fetch('/list')).json());
 }
 
 function parseVtt(vttText) {

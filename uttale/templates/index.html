@@ -5,14 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { margin: 20px; font-family: sans-serif; }
-        .subtitle { padding: 10px; margin: 5px 0; cursor: pointer; background: #f0f0f0; }
-        .subtitle.active { background: #e0e0e0; }
+        .subtitle { 
+            padding: 10px; 
+            margin: 5px 0; 
+            cursor: pointer; 
+            background: #f0f0f0;
+            transition: background-color 0.3s;
+        }
+        .subtitle.active { 
+            background: #e0e0e0; 
+            border-left: 4px solid #007bff;
+        }
+        #subtitles {
+            max-height: 60vh;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
         #search { width: 100%; padding: 10px; margin: 10px 0; }
         #fileList { margin-bottom: 20px; }
         audio { width: 100%; margin: 10px 0; }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            user-select: none;
+        }
     </style>
 </head>
 <body>
+    <div class="controls">
+        <label class="checkbox-label">
+            <input type="checkbox" id="autoScroll" checked>
+            Auto-scroll subtitles
+        </label>
+    </div>
     <input type="text" id="search" placeholder="Search files or subtitles...">
     <div id="fileList"></div>
     <audio id="player" controls></audio>

@@ -1,9 +1,11 @@
 let currentVtt = null;
 let currentSubtitle = null;
+let subtitleData = null;
 const player = document.getElementById('player');
 const searchInput = document.getElementById('search');
 const fileList = document.getElementById('fileList');
 const subtitles = document.getElementById('subtitles');
+const autoScrollCheckbox = document.getElementById('autoScroll');
 
 async function loadFiles() {
     const response = await fetch('/list');
@@ -27,8 +29,8 @@ async function loadVtt(filename) {
     const response = await fetch(`/vtt/${filename}`);
     const text = await response.text();
     currentVtt = text;
-    const parsedSubs = parseVtt(text);
-    displaySubtitles(parsedSubs);
+    subtitleData = parseVtt(text);
+    displaySubtitles(subtitleData);
     player.src = `/audio/${filename.replace('.vtt', '.ogg')}`;
 }
 
@@ -63,23 +65,45 @@ function timeToSeconds(timeString) {
 
 function displaySubtitles(subs) {
     subtitles.innerHTML = subs.map((sub, idx) =>
-        `<div class="subtitle" data-index="${idx}" onclick="playSubtitle(${idx})">${sub.text}</div>`
+        `<div class="subtitle" data-index="${idx}" data-start="${sub.start}" data-end="${sub.end}" onclick="playSubtitle(${idx})">${sub.text}</div>`
     ).join('');
 }
 
 function playSubtitle(idx) {
-    const subs = document.querySelectorAll('.subtitle');
     if (currentSubtitle === idx) {
         player.paused ? player.play() : player.pause();
     } else {
-        subs.forEach(sub => sub.classList.remove('active'));
-        subs[idx].classList.add('active');
-        const captionData = parseVtt(currentVtt)[idx];
-        player.currentTime = captionData.start;
+        highlightSubtitle(idx);
+        player.currentTime = subtitleData[idx].start;
         player.play();
         currentSubtitle = idx;
     }
 }
+
+function highlightSubtitle(idx) {
+    const subs = document.querySelectorAll('.subtitle');
+    subs.forEach(sub => sub.classList.remove('active'));
+    if (idx !== null) {
+        subs[idx].classList.add('active');
+        if (autoScrollCheckbox.checked) {
+            subs[idx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+}
+
+function findCurrentSubtitle(currentTime) {
+    return subtitleData.findIndex(sub => 
+        currentTime >= sub.start && currentTime <= sub.end
+    );
+}
+
+player.addEventListener('timeupdate', () => {
+    const currentIdx = findCurrentSubtitle(player.currentTime);
+    if (currentIdx !== currentSubtitle && currentIdx !== -1) {
+        currentSubtitle = currentIdx;
+        highlightSubtitle(currentIdx);
+    }
+});
 
 searchInput.addEventListener('input', e => {
     if (e.target.value.trim()) {

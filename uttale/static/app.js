@@ -33,7 +33,7 @@ async function loadVtt(filename) {
     currentVtt = text;
     subtitleData = parseVtt(text);
     displaySubtitles(subtitleData);
-    player.src = `/audio/${filename.replace('.vtt', '.ogg')}`;
+    player.src = `/audio/${filename}`;
     displayFiles(await (await fetch('/list')).json());
 }
 

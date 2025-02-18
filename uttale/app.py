@@ -38,8 +38,16 @@ def get_vtt(filename):
 
 @app.route('/audio/<filename>')
 def get_audio(filename):
-    audio_file = os.path.join(media_dir, filename.replace('.vtt', '.ogg'))
-    return send_file(audio_file)
+    base_name = filename.replace('.vtt', '')
+    extensions = ['.mp3', '.ogg']
+    
+    for ext in extensions:
+        audio_file = os.path.join(media_dir, base_name + ext)
+        if os.path.exists(audio_file):
+            print('Sending audio file:', audio_file)
+            return send_file(audio_file)
+    
+    return 'Audio file not found', 404
 
 if __name__ == '__main__':
     import sys

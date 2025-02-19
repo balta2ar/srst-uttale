@@ -38,13 +38,7 @@ async function loadVtt(filename) {
     const source = document.createElement('source');
     source.src = `/audio/${filename}`;
     player.appendChild(source);
-    
-    try {
-        await player.load();
-    } catch (e) {
-        console.error('Audio loading error:', e);
-        alert('Error loading audio. This format might not be supported on your device.');
-    }
+    player.load();
     
     displayFiles(await (await fetch('/list')).json());
 }

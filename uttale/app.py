@@ -39,20 +39,24 @@ def get_vtt(filename):
 MIME_TYPES = {
     '.mp3': 'audio/mpeg',
     '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac'
 }
 
 @app.route('/audio/<filename>')
 def get_audio(filename):
     base_name = filename.replace('.vtt', '')
-    extensions = ['.mp3', '.ogg']
+    extensions = ['.m4a', '.aac', '.mp3', '.ogg']
     
     for ext in extensions:
         audio_file = os.path.join(media_dir, base_name + ext)
         if os.path.exists(audio_file):
-            return send_file(
+            response = send_file(
                 audio_file,
                 mimetype=MIME_TYPES.get(ext, 'application/octet-stream')
             )
+            response.headers['Accept-Ranges'] = 'bytes'
+            return response
     
     return 'Audio file not found', 404
 

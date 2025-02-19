@@ -33,7 +33,19 @@ async function loadVtt(filename) {
     currentVtt = text;
     subtitleData = parseVtt(text);
     displaySubtitles(subtitleData);
-    player.src = `/audio/${filename}`;
+    
+    player.innerHTML = '';
+    const source = document.createElement('source');
+    source.src = `/audio/${filename}`;
+    player.appendChild(source);
+    
+    try {
+        await player.load();
+    } catch (e) {
+        console.error('Audio loading error:', e);
+        alert('Error loading audio. This format might not be supported on your device.');
+    }
+    
     displayFiles(await (await fetch('/list')).json());
 }
 
@@ -106,6 +118,10 @@ player.addEventListener('timeupdate', () => {
         currentSubtitle = currentIdx;
         highlightSubtitle(currentIdx);
     }
+});
+
+player.addEventListener('error', (e) => {
+    console.error('Audio error:', player.error);
 });
 
 searchInput.addEventListener('input', e => {

@@ -16,7 +16,7 @@ from tempfile import gettempdir
 from time import perf_counter
 from typing import Callable, List, Optional
 from urllib.error import URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import urlopen, urlretrieve
 
 from diskcache import Cache
@@ -118,7 +118,7 @@ class UttaleAPI:
 
     def get_audio_url(self, filename: str, start: str = "", end: str = "") -> str:
         return (f"{self.base_url}/uttale/Audio?"
-            f"filename={filename}&"
+            f"filename={quote(filename)}&"
             f"start={start}&"
             f"end={end}")
 

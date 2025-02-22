@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import logging
 import socket
 from bisect import bisect_left
@@ -267,6 +268,7 @@ class SearchUI(QMainWindow):
             alt-@: Focus episode tab<br>
             alt-#: Focus help tab<br>
             ctrl-t: Pause/play audio<br>
+            ctrl-r: Reset all caches<br>
 """)
         help_layout.addWidget(self.help_text)
 
@@ -311,6 +313,9 @@ class SearchUI(QMainWindow):
                 return True
             if event.key() == Qt.Key.Key_T and not isinstance(obj, QLineEdit):
                 self.toggle_player_state()
+                return True
+            if event.key() == Qt.Key.Key_R:
+                self.reset_caches()
                 return True
         elif event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.AltModifier:
             if event.key() == Qt.Key.Key_Exclam:
@@ -620,6 +625,16 @@ class SearchUI(QMainWindow):
 
         self.save_state()
         super().closeEvent(event)
+
+    def reset_caches(self):
+        try:
+            cache.clear()
+            if self.temp_dir.exists():
+                shutil.rmtree(self.temp_dir)
+            self.temp_dir.mkdir(exist_ok=True)
+            logger.info("Successfully cleared all caches")
+        except Exception as e:
+            logger.error(f"Error clearing caches: {e}")
 
 def main():
     app = QApplication(argv)

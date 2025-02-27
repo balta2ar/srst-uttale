@@ -45,6 +45,7 @@ class StatusResponse(BaseModel):
 
 app = FastAPI()
 db_duckdb = None
+args = None
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -265,6 +266,7 @@ def trigger_reindex(background_tasks: BackgroundTasks) -> Reindex:
     return result
 
 def main():
+    global args
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--iface", default="0.0.0.0:7010")

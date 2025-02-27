@@ -2,6 +2,7 @@ from flask import Flask, render_template, send_file, jsonify, request
 from os import path
 from os import environ
 from glob import glob
+import logging
 import webvtt
 import argparse
 
@@ -10,6 +11,8 @@ def get_vtt_files(directory):
 
 app = Flask(__name__)
 media_dir = None
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('mobile')
 
 @app.route('/')
 def index():
@@ -55,6 +58,7 @@ def get_audio(filename):
     for ext in extensions:
         audio_file = path.join(media_dir, base_name + ext)
         if path.exists(audio_file):
+            logger.info(f'Serving audio file: {audio_file}')
             response = send_file(
                 audio_file,
                 mimetype=MIME_TYPES.get(ext, 'application/octet-stream')

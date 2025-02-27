@@ -73,7 +73,8 @@ def main():
     args = parser.parse_args()
     print(args)
     global media_dir
-    media_dir = args.media_dir
+    media_dir = path.abspath(args.media_dir)
+    print(f'Using media directory: {media_dir}')
     
     vtt_count = len(get_vtt_files(media_dir))
     print(f'Found {vtt_count} VTT files in {media_dir}')

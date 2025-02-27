@@ -63,7 +63,7 @@ def get_audio(filename):
     
     return 'Audio file not found', 404
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description='VTT and Audio file server')
     parser.add_argument('media_dir', help='Directory containing VTT and audio files')
     parser.add_argument('--interface', default='0.0.0.0', help='Interface to listen on (default: 0.0.0.0)')
@@ -71,9 +71,13 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     print(args)
+    global media_dir
     media_dir = args.media_dir
     
     vtt_count = len(get_vtt_files(media_dir))
     print(f'Found {vtt_count} VTT files in {media_dir}')
     
     app.run(host=args.interface, port=args.port)
+
+if __name__ == '__main__':
+    main()

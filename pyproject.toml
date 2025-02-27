@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 srst-uttale = "uttale.quick_ui:main"
+srst-uttale-mobile = "uttale.mobile.mobile:main"
 
 [build-system]
 requires = ["hatchling"]

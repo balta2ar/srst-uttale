@@ -1,12 +1,15 @@
 import argparse
+import hashlib
 import logging
 import re
 import subprocess
+import tempfile
 from glob import glob
-from os import environ, path
+from os import path
+from pathlib import Path
 
 import webvtt
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, render_template, request, send_file
 
 
 def get_vtt_files(directory):
@@ -53,42 +56,38 @@ MIME_TYPES = {
     '.aac': 'audio/aac'
 }
 
-def stream_converted_audio(input_file):
-    def generate():
-        cmd = [
-            'ffmpeg',
-            '-i', input_file,     # Input file
-            '-f', 'mp3',          # Output format
-            '-acodec', 'libmp3lame',  # MP3 codec
-            '-ab', '128k',        # Bitrate
-            '-ac', '2',           # Audio channels
-            '-ar', '44100',       # Sample rate
-            '-'                   # Output to stdout
-        ]
+def ensure_temp(suffix: str) -> str:
+    temp_dir = Path(tempfile.gettempdir()) / 'srst_uttale' / suffix
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return str(temp_dir)
 
-        process = subprocess.Popen(
-            cmd,
+
+def convert_audio(input_file: str) -> str:
+    temp_dir = ensure_temp('audio')
+    
+    file_hash = hashlib.md5(input_file.encode()).hexdigest()
+    basename = path.splitext(path.basename(input_file))[0]
+    output_file = path.join(temp_dir, f"{basename}_{file_hash}.mp3")
+    
+    if path.exists(output_file):
+        logger.info(f'Using previously converted file: {output_file}')
+        return output_file
+        
+    logger.info(f'Converting {input_file} to {output_file}')
+    try:
+        subprocess.run(
+            ['ffmpeg', '-i', input_file, '-codec:a', 'libmp3lame', '-qscale:a', '2', output_file],
+            check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,  # Suppress FFmpeg output
-            bufsize=4096  # Buffer size for output chunks
+            stderr=subprocess.PIPE
         )
+        return output_file
+    except subprocess.CalledProcessError as e:
+        logger.error(f'Error converting audio: {e}')
+        return input_file
 
-        while True:
-            chunk = process.stdout.read(4096)
-            if not chunk:
-                break
-            yield chunk
-
-        process.wait()
-
-    return Response(
-        generate(),
-        mimetype='audio/mpeg',
-        headers={'Accept-Ranges': 'bytes'}
-    )
-
+ios_pattern = re.compile(r'(iPhone|iPad|iPod)')
 def is_ios_client(user_agent):
-    ios_pattern = re.compile(r'(iPhone|iPad|iPod)')
     return bool(ios_pattern.search(user_agent))
 
 @app.route('/audio/<filename>')
@@ -101,8 +100,8 @@ def get_audio(filename):
         audio_file = path.join(media_dir, base_name + ext)
         if path.exists(audio_file):
             if is_ios_client(user_agent):
-                logger.info(f'Converting on-the-fly: {audio_file}')
-                return stream_converted_audio(audio_file)
+                logger.info(f'Converting for iOS: {audio_file}')
+                audio_file, ext = convert_audio(audio_file), '.mp3'
 
             logger.info(f'Serving audio file: {audio_file}')
             response = send_file(

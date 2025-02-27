@@ -34,9 +34,13 @@ async function loadVtt(filename) {
     subtitleData = parseVtt(text);
     displaySubtitles(subtitleData);
     
+    const audioResponse = await fetch(`/audio/${filename}`, { method: 'HEAD' });
+    const contentType = audioResponse.headers.get('content-type');
+    
     player.innerHTML = '';
     const source = document.createElement('source');
     source.src = `/audio/${filename}`;
+    source.type = contentType;
     player.appendChild(source);
     player.load();
     

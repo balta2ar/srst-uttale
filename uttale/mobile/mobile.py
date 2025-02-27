@@ -1,11 +1,12 @@
 from flask import Flask, render_template, send_file, jsonify, request
-import os
-import glob
+from os import path
+from os import environ
+from glob import glob
 import webvtt
 import argparse
 
 def get_vtt_files(directory):
-    return glob.glob(os.path.join(directory, '*.vtt'))
+    return glob(path.join(directory, '*.vtt'))
 
 app = Flask(__name__)
 media_dir = None
@@ -16,7 +17,7 @@ def index():
 
 @app.route('/list')
 def list_files():
-    return jsonify(sorted([os.path.basename(f) for f in get_vtt_files(media_dir)]))
+    return jsonify(sorted([path.basename(f) for f in get_vtt_files(media_dir)]))
 
 @app.route('/search')
 def search():
@@ -31,13 +32,13 @@ def search():
                 found = True
                 break
         if found:
-            results.append(os.path.basename(vtt_file))
+            results.append(path.basename(vtt_file))
     
     return jsonify(sorted(results))
 
 @app.route('/vtt/<filename>')
 def get_vtt(filename):
-    return send_file(os.path.join(media_dir, filename))
+    return send_file(path.join(media_dir, filename))
 
 MIME_TYPES = {
     '.mp3': 'audio/mpeg',
@@ -52,8 +53,8 @@ def get_audio(filename):
     extensions = ['.m4a', '.aac', '.mp3', '.ogg']
     
     for ext in extensions:
-        audio_file = os.path.join(media_dir, base_name + ext)
-        if os.path.exists(audio_file):
+        audio_file = path.join(media_dir, base_name + ext)
+        if path.exists(audio_file):
             response = send_file(
                 audio_file,
                 mimetype=MIME_TYPES.get(ext, 'application/octet-stream')

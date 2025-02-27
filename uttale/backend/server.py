@@ -264,7 +264,7 @@ def trigger_reindex(background_tasks: BackgroundTasks) -> Reindex:
     result.status = "Reindexing started in background"
     return result
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--iface", default="0.0.0.0:7010")
@@ -278,3 +278,6 @@ if __name__ == "__main__":
     except:
         exit(1)
     uvicorn.run(app, host=iface, port=int(port))
+
+if __name__ == "__main__":
+    main()

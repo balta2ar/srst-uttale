@@ -23,8 +23,9 @@ dependencies = [
 ]
 
 [project.scripts]
-srst-uttale-quick-qt = "uttale.quick_ui:main"
+srst-uttale-quick-qt = "uttale.quick_ui_qt.quick_ui_qt:main"
 srst-uttale-mobile = "uttale.mobile.mobile:main"
+srst-uttale-backend-api = "uttale.backend.server:main"
 
 [build-system]
 requires = ["hatchling"]

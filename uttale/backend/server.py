@@ -1,12 +1,15 @@
 import argparse
+import fnmatch
 import logging
 import multiprocessing as mp
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from os.path import exists, join, relpath, splitext
+from pathlib import Path
 from typing import Dict, List
 
 import duckdb
@@ -38,10 +41,20 @@ class Play(BaseModel):
     status: str = ""
 
 class Reindex(BaseModel):
+    pattern: str = ""
     status: str = ""
 
 class StatusResponse(BaseModel):
     status: str
+
+class ArgumentParserWithDefaults(argparse.ArgumentParser):
+    def format_help(self):
+        help_text = super().format_help()
+        help_text += "\nCurrent argument values:\n"
+        for action in self._actions:
+            if action.dest != 'help' and hasattr(action, 'default') and action.default is not None and action.default != argparse.SUPPRESS:
+                help_text += f"  {action.dest}: {action.default}\n"
+        return help_text
 
 app = FastAPI()
 db_duckdb = None
@@ -56,10 +69,19 @@ async def log_requests(request: Request, call_next):
     logging.debug(f"Headers: {headers}")
     return await call_next(request)
 
+def resolve_db_path(db_arg: str) -> str:
+    """Resolve database path based on argument rules"""
+    if "/" not in db_arg and "\\" not in db_arg and not db_arg.startswith("~"):
+        cache_dir = Path.home() / ".cache" / "srst-uttale"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return str(cache_dir / db_arg)
+    return db_arg
+
 def init_database():
     """Initialize the database and create tables"""
     global db_duckdb
-    db_duckdb = duckdb.connect("lines_duckdb.db")
+    db_path = resolve_db_path(args.db)
+    db_duckdb = duckdb.connect(db_path)
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)")
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS scopes (scope VARCHAR)")
 
@@ -103,12 +125,26 @@ def update_progress(total: int, counter, lock: mp.Lock, stop_event: threading.Ev
         pbar.n = total
         pbar.refresh()
 
-def reindex(root: str):
+def pattern_to_wildcard(pattern: str) -> str:
+    """Convert user pattern to wildcard expression"""
+    if not pattern:
+        return "*"
+    parts = pattern.strip().split()
+    if not parts:
+        return "*"
+    wildcard = "*" + "*".join(parts) + "*"
+    return wildcard.lower()
+
+def reindex(root: str, pattern: str = ""):
     try:
         fd = subprocess.run(["fd", "--type", "f", "--extension", "vtt", "--base-directory", root], capture_output=True, text=True, check=True)
         vtt_files = fd.stdout.splitlines()
     except:
         vtt_files = []
+
+    if pattern:
+        wildcard = pattern_to_wildcard(pattern)
+        vtt_files = [f for f in vtt_files if fnmatch.fnmatch(f.lower(), wildcard)]
     total_files = len(vtt_files)
     if not vtt_files:
         return
@@ -258,23 +294,48 @@ def audio_endpoint(filename: str, start: str, end: str, range_header: str = Head
     return Response(content=audio_data, media_type="application/octet-stream", headers=headers, status_code=status_code)
 
 @app.post("/uttale/Reindex", response_model=Reindex)
-def trigger_reindex(background_tasks: BackgroundTasks) -> Reindex:
+def trigger_reindex(request: Reindex, background_tasks: BackgroundTasks) -> Reindex:
     """Trigger reindexing of subtitle files"""
-    result = Reindex()
-    background_tasks.add_task(reindex, args.root)
+    result = Reindex(pattern=request.pattern)
+    background_tasks.add_task(reindex, args.root, request.pattern)
     result.status = "Reindexing started in background"
     return result
 
 def main():
     global args
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".")
-    parser.add_argument("--iface", default="0.0.0.0:7010")
-    parser.add_argument("--reindex", action="store_true", default=False)
+    parser = ArgumentParserWithDefaults(
+        description="SRST Uttale backend server for subtitle search and audio playback",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Root directory containing VTT subtitle files (default: current directory)"
+    )
+    parser.add_argument(
+        "--iface",
+        default="0.0.0.0:7010",
+        help="Network interface and port to bind to (format: host:port)"
+    )
+    parser.add_argument(
+        "--db",
+        default="lines_duckdb.db",
+        help="Database file path. Simple filename (e.g., '202510.db') is stored in ~/.cache/srst-uttale/, "
+             "otherwise path is used as-is (e.g., './test.db' or '/tmp/line.db')"
+    )
+    parser.add_argument(
+        "--reindex",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="PATTERN",
+        help="Reindex VTT files and exit. Optional PATTERN for case-insensitive wildcard filtering "
+             "(e.g., '202510 kontakt' matches files containing both terms, spaces act as wildcards)"
+    )
     args = parser.parse_args()
     init_database()
-    if args.reindex:
-        reindex(args.root)
+    if args.reindex is not None:
+        reindex(args.root, args.reindex)
     try:
         iface, port = args.iface.split(":")
     except:

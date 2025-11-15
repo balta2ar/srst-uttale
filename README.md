@@ -8,6 +8,7 @@ A fast and efficient search and playback tool for audio files.
 * [Server](#server)
 * [Client](#client)
 * [Usage](#usage)
+* [Testing](#testing)
 
 ## Overview
 The Uttale Project is designed to provide a simple and efficient way to search
@@ -54,3 +55,33 @@ To use the Uttale Project, follow these steps:
 2. Enter a search query in the search bar
 3. Select a scope from the list of scopes
 4. Click the play button next to a search result to playback the audio segment
+
+## Testing
+The project includes unit tests using Python's standard library `unittest` module.
+
+### Running Tests
+Run all tests using the Makefile:
+```bash
+make test
+```
+
+Or run backend tests specifically:
+```bash
+make test-backend
+```
+
+Or run tests directly:
+```bash
+python3 -m unittest uttale.backend.test_server -v
+```
+
+### Test Coverage
+The test suite covers:
+* Database path resolution (simple filenames vs. relative/absolute paths)
+* Cache directory creation
+* Wildcard pattern conversion for reindexing
+* Pattern filtering with case-insensitive matching
+
+### Other Makefile Targets
+* `make help` - Show available targets
+* `make clean` - Remove cache and temporary files

@@ -22,10 +22,11 @@ from urllib.request import urlopen, urlretrieve
 from diskcache import Cache
 from line_profiler import profile
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QCursor, QFont, QKeyEvent
+from PyQt6.QtGui import QCursor, QFont, QFontMetrics, QKeyEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -44,6 +45,10 @@ logging.basicConfig(
 logger = logging.getLogger("general")
 cache = Cache(Path(gettempdir()) / "uttale_audio" / "cache")
 ONE_WEEK = 60 * 60 * 24 * 7
+DEBOUNCE_MS = 1000
+PLAYER_MONITOR_MS = 100
+AUDIO_CLIP_MARGIN = 0.5
+
 
 class MPV:
     def __init__(self, socket_path: str):
@@ -70,6 +75,7 @@ class MPV:
         # Force kill any remaining mpv processes
         run(["pkill", "mpv"], check=False)
 
+
 class UttaleAPI:
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
@@ -90,7 +96,9 @@ class UttaleAPI:
                 response_time = perf_counter() - start_time
 
                 response_json = loads(data.decode())
-                self.logger.info(f"Received in {response_time:.3f}s: {len(response_json)}")
+                self.logger.info(
+                    f"Received in {response_time:.3f}s: {len(response_json)}"
+                )
                 return response_json
 
         except URLError as e:
@@ -98,29 +106,46 @@ class UttaleAPI:
             return None
 
     def search_scopes(self, query: str, limit: int = 1000) -> List[str]:
-        result = self._make_request("/uttale/Scopes", {
-            "q": query,
-            "limit": limit,
-        })
+        result = self._make_request(
+            "/uttale/Scopes",
+            {
+                "q": query,
+                "limit": limit,
+            },
+        )
         if result and isinstance(result.get("results"), list):
             return result["results"]
         return []
 
-    def search_text(self, query: str, scope: str = "", limit: int = 1000) -> List["SearchResult"]:
-        result = self._make_request("/uttale/Search", {
-            "q": query,
-            "scope": scope,
-            "limit": limit,
-        })
+    def search_text(
+        self, query: str, scope: str = "", limit: int = 1000
+    ) -> List["SearchResult"]:
+        result = self._make_request(
+            "/uttale/Search",
+            {
+                "q": query,
+                "scope": scope,
+                "limit": limit,
+            },
+        )
         if result and isinstance(result.get("results"), list):
             return [SearchResult(**item) for item in result["results"]]
         return []
 
     def get_audio_url(self, filename: str, start: str = "", end: str = "") -> str:
-        return (f"{self.base_url}/uttale/Audio?"
+        if start:
+            start = seconds_to_timestamp(
+                timestamp_to_seconds(start) - AUDIO_CLIP_MARGIN
+            )
+        if end:
+            end = seconds_to_timestamp(timestamp_to_seconds(end) + AUDIO_CLIP_MARGIN)
+        return (
+            f"{self.base_url}/uttale/Audio?"
             f"filename={quote(filename)}&"
             f"start={start}&"
-            f"end={end}")
+            f"end={end}"
+        )
+
 
 def timestamp_to_seconds(timestamp: str) -> float:
     time_parts = timestamp.split(":")
@@ -133,6 +158,15 @@ def timestamp_to_seconds(timestamp: str) -> float:
     s, ms = s.split(".")
     return int(m) * 60 + int(s) + float(f"0.{ms}")
 
+
+def seconds_to_timestamp(seconds: float) -> str:
+    seconds = max(0.0, seconds)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
+
 def ensure_download(scope: str, api: UttaleAPI) -> str:
     local_path = Path(gettempdir()) / "uttale_audio" / f"{scope}.ogg"
     local_path.parent.mkdir(exist_ok=True, parents=True)
@@ -143,32 +177,58 @@ def ensure_download(scope: str, api: UttaleAPI) -> str:
         logger.info(f"Downloaded {scope} in {elapsed_time:.2f} seconds")
     return str(local_path)
 
+
 def style_default(button: QWidget | None) -> None:
-    if button: button.setStyleSheet("text-align: left;")
+    if button:
+        button.setStyleSheet("text-align: left;")
+
+
 def style_yellow(button: QWidget) -> None:
-    if button: button.setStyleSheet("text-align: left; background-color: yellow;")
+    if button:
+        button.setStyleSheet("text-align: left; background-color: yellow;")
+
+
 def style_green(button: QWidget) -> None:
-    if button: button.setStyleSheet("text-align: left; background-color: lightgreen;")
+    if button:
+        button.setStyleSheet("text-align: left; background-color: lightgreen;")
+
+
+def format_source(filename: str) -> str:
+    parts = filename.split("/")
+    name = parts[1] if len(parts) > 1 else filename
+    date = parts[2] if len(parts) > 2 else ""
+    if len(date) == 8:
+        date = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    return f"{name}\n{date}"
+
 
 def start_player(self: "SearchUI", start_time: Optional[float], url: str) -> Popen[str]:
-    cmd = ["mpv",
+    cmd = [
+        "mpv",
         "--no-video",
         "--idle=yes",
         "--force-window=no",
         "--no-terminal",
         # both seem to work fine
         # "--af=lavfi=[loudnorm=i=-14.0:lra=13.0:tp=-1.0]", # https://old.reddit.com/r/mpv/comments/xf8p9t/movie_volume_compression/
-        "--af=lavfi=[loudnorm=I=-14:TP=-3:LRA=7]", # https://old.reddit.com/r/mpv/comments/yk7d63/good_method_to_normalise_audio_in_mpv/
+        "--af=lavfi=[loudnorm=I=-14:TP=-3:LRA=7]",  # https://old.reddit.com/r/mpv/comments/yk7d63/good_method_to_normalise_audio_in_mpv/
         # "--af=lavfi=[loudnorm=I=-16:LRA=11:TP=-1.5]", # https://bbs.archlinux.org/viewtopic.php?pid=1995208#p1995208
         # I: -14 (louder)..-16
         # LRA: 13..11 (more dynamic)..9
-        f"--input-ipc-server={self.mpv_socket}", url]
+        f"--input-ipc-server={self.mpv_socket}",
+        url,
+    ]
     if start_time:
         cmd.insert(1, f"--start={start_time}")
     logger.info("cmd: %s", " ".join(cmd))
     return Popen(
-        cmd, stdin=PIPE, stderr=STDOUT, text=True, bufsize=1,
+        cmd,
+        stdin=PIPE,
+        stderr=STDOUT,
+        text=True,
+        bufsize=1,
     )
+
 
 @dataclass
 class SearchResult:
@@ -176,6 +236,7 @@ class SearchResult:
     text: str
     start: str
     end: str
+
     def offset(self, api: UttaleAPI) -> int:
         # TODO: this is not efficient to send a new request for each offset,
         # it's server that should return the offset in search results
@@ -184,6 +245,7 @@ class SearchResult:
             if result.start == self.start:
                 return i
         return 0
+
 
 class SearchUI(QMainWindow):
     def __init__(self):
@@ -278,11 +340,22 @@ class SearchUI(QMainWindow):
         self.text_search.textChanged.connect(self.on_text_search_changed)
         self.scope_suggestions.itemClicked.connect(self.on_scope_selected)
 
-        self.episode_scope_search.textChanged.connect(self.on_episode_scope_search_changed)
-        self.episode_scope_suggestions.itemClicked.connect(self.on_episode_scope_selected)
-        self.episode_scope_suggestions.itemDoubleClicked.connect(self.on_episode_scope_double_clicked)
+        self.episode_scope_search.textChanged.connect(
+            self.on_episode_scope_search_changed
+        )
+        self.episode_scope_suggestions.itemClicked.connect(
+            self.on_episode_scope_selected
+        )
+        self.episode_scope_suggestions.itemDoubleClicked.connect(
+            self.on_episode_scope_double_clicked
+        )
 
-        for widget in [main_widget, self.scope_search, self.text_search, self.episode_scope_search]:
+        for widget in [
+            main_widget,
+            self.scope_search,
+            self.text_search,
+            self.episode_scope_search,
+        ]:
             widget.installEventFilter(self)
 
     def toggle_player_state(self):
@@ -300,7 +373,10 @@ class SearchUI(QMainWindow):
             self.is_player_paused = True
 
     def eventFilter(self, obj, event):
-        if event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+        if (
+            event.type() == event.Type.KeyPress
+            and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+        ):
             if event.key() == Qt.Key.Key_K:
                 self.tab_widget.setCurrentWidget(self.search_tab)
                 self.text_search.setFocus()
@@ -317,7 +393,10 @@ class SearchUI(QMainWindow):
             if event.key() == Qt.Key.Key_R:
                 self.reset_caches()
                 return True
-        elif event.type() == event.Type.KeyPress and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+        elif (
+            event.type() == event.Type.KeyPress
+            and event.modifiers() == Qt.KeyboardModifier.AltModifier
+        ):
             if event.key() == Qt.Key.Key_Exclam:
                 self.tab_widget.setCurrentIndex(0)
                 return True
@@ -330,7 +409,10 @@ class SearchUI(QMainWindow):
         return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape or (event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q):
+        if event.key() == Qt.Key.Key_Escape or (
+            event.modifiers() == Qt.KeyboardModifier.ControlModifier
+            and event.key() == Qt.Key.Key_Q
+        ):
             self.close()
         else:
             super().keyPressEvent(event)
@@ -355,7 +437,7 @@ class SearchUI(QMainWindow):
         self.current_player = None
         self.current_episode_url = None
         self.player_monitor_timer = QTimer()
-        self.player_monitor_timer.setInterval(100)
+        self.player_monitor_timer.setInterval(PLAYER_MONITOR_MS)
         self.player_monitor_timer.timeout.connect(self.monitor_player_position)
 
     def setup_temporary_storage(self):
@@ -410,17 +492,17 @@ class SearchUI(QMainWindow):
                 pass
 
     def on_scope_search_changed(self):
-        self.scope_timer.start(200)
-        self.search_timer.start(500)
-        self.save_timer.start(1000)
+        self.scope_timer.start(DEBOUNCE_MS)
+        self.search_timer.start(DEBOUNCE_MS)
+        self.save_timer.start(DEBOUNCE_MS)
 
     def on_text_search_changed(self):
-        self.search_timer.start(500)
-        self.save_timer.start(1000)
+        self.search_timer.start(DEBOUNCE_MS)
+        self.save_timer.start(DEBOUNCE_MS)
 
     def on_episode_scope_search_changed(self):
-        self.episode_scope_timer.start(200)
-        self.save_timer.start(1000)
+        self.episode_scope_timer.start(DEBOUNCE_MS)
+        self.save_timer.start(DEBOUNCE_MS)
 
     def search_scopes(self):
         query = self.scope_search.text()
@@ -453,7 +535,9 @@ class SearchUI(QMainWindow):
         self.episode_scope_search.setText(item.text())
 
     @profile
-    def on_episode_scope_selected(self, scope_item: QListWidgetItem, index: int = -1) -> None:
+    def on_episode_scope_selected(
+        self, scope_item: QListWidgetItem, index: int = -1
+    ) -> None:
         if not scope_item:
             return
 
@@ -472,22 +556,22 @@ class SearchUI(QMainWindow):
             item_layout = QHBoxLayout(item_widget)
             item_layout.setContentsMargins(0, 0, 0, 0)
 
-            text = (f"{result.text} \n"
-                f"[{result.start} - {result.end}]")
+            text = f"{result.text} \n[{result.start} - {result.end}]"
             text_button = QPushButton(text)
             style_default(text_button)
 
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)
             play_button.clicked.connect(
-                lambda checked, r=result: self.play_episode_from(r))
+                lambda checked, r=result: self.play_episode_from(r)
+            )
 
             item_layout.addWidget(play_button)
             item_layout.addWidget(text_button)
 
             self.episode_start_times.append(timestamp_to_seconds(result.start))
             self.episode_results.addItem("")
-            item = self.episode_results.item(self.episode_results.count()-1)
+            item = self.episode_results.item(self.episode_results.count() - 1)
             self.episode_results.setItemWidget(item, item_widget)
 
             if len(self.episode_start_times) - 1 == index:
@@ -512,7 +596,7 @@ class SearchUI(QMainWindow):
 
     def highlight_current_position(self, position: float) -> None:
         idx = bisect_left(self.episode_start_times, position) - 1
-        idx = max(0, min(len(self.episode_start_times)-1, idx))
+        idx = max(0, min(len(self.episode_start_times) - 1, idx))
 
         if self._last_highlighted_idx is not None:
             last_item = self.episode_results.item(self._last_highlighted_idx)
@@ -560,7 +644,21 @@ class SearchUI(QMainWindow):
         results = self.api.search_text(query, scope)
         self.results_list.clear()
 
+        fm = QFontMetrics(QApplication.font())
+        source_width = (
+            max(
+                (
+                    fm.boundingRect(line).width()
+                    for r in results
+                    for line in format_source(r.filename).split("\n")
+                ),
+                default=0,
+            )
+            + 10
+        )
+
         last_button: QWidget | None = None
+
         def on_text_button_clicked(button: QPushButton, result: SearchResult) -> None:
             nonlocal last_button
             style_default(last_button)
@@ -573,25 +671,28 @@ class SearchUI(QMainWindow):
             item_layout = QHBoxLayout(item_widget)
             item_layout.setContentsMargins(0, 0, 0, 0)
 
-            text = (f"{result.text} \n"
-                    f"[{result.start} - {result.end}]")
+            source_label = QLabel(format_source(result.filename))
+            source_label.setFixedWidth(source_width)
+
+            text = f"{result.text} \n[{result.start} - {result.end}]"
             text_button = QPushButton(text)
             style_default(text_button)
             text_button.clicked.connect(
-                lambda checked, b=text_button, r=result: on_text_button_clicked(b, r))
+                lambda checked, b=text_button, r=result: on_text_button_clicked(b, r)
+            )
 
             play_button = QPushButton("▶")
             play_button.setFixedWidth(30)
-            play_button.clicked.connect(
-                lambda checked, r=result: self.play_audio(r))
+            play_button.clicked.connect(lambda checked, r=result: self.play_audio(r))
 
+            item_layout.addWidget(source_label)
             item_layout.addWidget(play_button)
             item_layout.addWidget(text_button)
 
             self.results_list.addItem("")
             self.results_list.setItemWidget(
-                self.results_list.item(self.results_list.count()-1),
-                item_widget)
+                self.results_list.item(self.results_list.count() - 1), item_widget
+            )
 
     def show_episode(self, result: SearchResult):
         self.tab_widget.setCurrentIndex(1)
@@ -636,11 +737,13 @@ class SearchUI(QMainWindow):
         except Exception as e:
             logger.error(f"Error clearing caches: {e}")
 
+
 def main():
     app = QApplication(argv)
     window = SearchUI()
     window.show()
     exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,7 @@ import polars as pl
 import uvicorn
 import webvtt
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from tqdm import tqdm
 
@@ -68,6 +69,13 @@ class ArgumentParserWithDefaults(argparse.ArgumentParser):
 
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
+)
 db_duckdb = None
 args = None
 

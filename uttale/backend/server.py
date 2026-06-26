@@ -385,6 +385,7 @@ def audio_endpoint(
 ) -> Response:
     """Extract audio segment"""
     audio_data, headers = get_audio_segment(filename, start, end, range_header)
+    headers["Vary"] = "Origin"
     status_code = 206 if range_header else 200
     return Response(
         content=audio_data,

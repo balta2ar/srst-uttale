@@ -94,11 +94,26 @@ class Topic(BaseModel):
     title: str
     start: str
 
-
 class Topics(BaseModel):
     filename: str = ""
     results_count: int = 0
     results: list[Topic] = []
+
+
+class Listen(BaseModel):
+    filename: str
+    position: str
+    updated_at: str
+
+
+class Listens(BaseModel):
+    results_count: int = 0
+    results: list[Listen] = []
+
+
+class ListenAdd(BaseModel):
+    filename: str
+    position: str
 
 
 class ArgumentParserWithDefaults(argparse.ArgumentParser):
@@ -254,6 +269,54 @@ def favorites_delete(db_path: str, filename: str, start: str) -> bool:
             "DELETE FROM favorites WHERE filename = ? AND start = ?", (filename, start)
         )
         return cur.rowcount > 0
+
+
+LISTENS_LIMIT = 10
+
+
+@contextmanager
+def listens_db(db_path: str):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS listens ("
+            "filename TEXT PRIMARY KEY, position TEXT, updated_at TEXT)"
+        )
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def listens_list(db_path: str) -> List[dict]:
+    with listens_db(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM listens ORDER BY updated_at DESC LIMIT ?", (LISTENS_LIMIT,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def listens_upsert(db_path: str, filename: str, position: str) -> dict:
+    now = now_iso()
+    with listens_db(db_path) as conn:
+        conn.execute(
+            "INSERT INTO listens (filename, position, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(filename) DO UPDATE SET "
+            "position = excluded.position, updated_at = excluded.updated_at",
+            (filename, position, now),
+        )
+        conn.execute(
+            "DELETE FROM listens WHERE filename NOT IN "
+            "(SELECT filename FROM listens ORDER BY updated_at DESC LIMIT ?)",
+            (LISTENS_LIMIT,),
+        )
+        row = conn.execute(
+            "SELECT * FROM listens WHERE filename = ?", (filename,)
+        ).fetchone()
+        return dict(row)
 
 
 def parse_time(t: str) -> float:
@@ -592,6 +655,10 @@ def favorites_db_path() -> str:
     return resolve_db_path(args.favorites_db)
 
 
+def listens_db_path() -> str:
+    return resolve_db_path(args.listens_db)
+
+
 @app.get("/uttale/Favorites", response_model=Favorites)
 def favorites_index(filename: str = "", sort: str = "created_desc") -> Favorites:
     """List favorites, optionally filtered by filename and sorted"""
@@ -650,6 +717,26 @@ def favorites_export() -> StatusResponse:
     return StatusResponse(status="not implemented")
 
 
+@app.get("/uttale/Listens", response_model=Listens)
+def listens_index() -> Listens:
+    """List the most recent listens, newest first"""
+    try:
+        rows = listens_list(listens_db_path())
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Listens query failed")
+    return Listens(results=[Listen(**row) for row in rows], results_count=len(rows))
+
+
+@app.post("/uttale/Listens", response_model=Listen)
+def listens_create(listen: ListenAdd) -> Listen:
+    """Upsert a listen position for an episode (keeps only LISTENS_LIMIT most recent)"""
+    try:
+        row = listens_upsert(listens_db_path(), listen.filename, listen.position)
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Listen upsert failed")
+    return Listen(**row)
+
+
 def detect_lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -705,6 +792,12 @@ def main():
         default="favorites.db",
         help="Favorites SQLite database path. Same path rules as --db "
         "(simple filename goes to ~/.cache/srst-uttale/)",
+    )
+    parser.add_argument(
+        "--listens-db",
+        default="listens.db",
+        help="Listens SQLite database path (separate file, WAL mode). Same path "
+        "rules as --db (simple filename goes to ~/.cache/srst-uttale/)",
     )
     parser.add_argument(
         "--reindex",

@@ -20,6 +20,9 @@ from uttale.backend.server import (
     favorites_delete,
     parse_topic_time,
     read_topics,
+    listens_upsert,
+    listens_list,
+    LISTENS_LIMIT,
 )
 
 
@@ -340,6 +343,52 @@ class TestReadTopics(unittest.TestCase):
         topics = read_topics(self.root, self.filename)
         self.assertEqual(len(topics), 1)
         self.assertEqual(topics[0].title, 'has title')
+
+
+class TestListens(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.db = os.path.join(self.dir, 'listens.db')
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_upsert_inserts_row(self):
+        row = listens_upsert(self.db, 'a/p/d/x_00.vtt', '00:01:00.000')
+        self.assertEqual(row['filename'], 'a/p/d/x_00.vtt')
+        self.assertEqual(row['position'], '00:01:00.000')
+        self.assertTrue(row['updated_at'])
+
+    def test_upsert_updates_position_not_duplicate(self):
+        listens_upsert(self.db, 'a/p/d/x_00.vtt', '00:01:00.000')
+        row = listens_upsert(self.db, 'a/p/d/x_00.vtt', '00:05:00.000')
+        self.assertEqual(row['position'], '00:05:00.000')
+        self.assertEqual(len(listens_list(self.db)), 1)
+
+    def test_list_newest_first(self):
+        listens_upsert(self.db, 'a/p/d/one_00.vtt', '00:00:10.000')
+        time.sleep(0.01)
+        listens_upsert(self.db, 'a/p/d/two_00.vtt', '00:00:20.000')
+        rows = listens_list(self.db)
+        self.assertEqual(rows[0]['filename'], 'a/p/d/two_00.vtt')
+        self.assertEqual(rows[1]['filename'], 'a/p/d/one_00.vtt')
+
+    def test_prune_keeps_only_limit_most_recent(self):
+        for i in range(LISTENS_LIMIT + 5):
+            listens_upsert(self.db, f'a/p/d/ep{i:02d}_00.vtt', '00:00:01.000')
+            time.sleep(0.005)
+        rows = listens_list(self.db)
+        self.assertEqual(len(rows), LISTENS_LIMIT)
+        names = {r['filename'] for r in rows}
+        self.assertNotIn('a/p/d/ep00_00.vtt', names)
+        self.assertIn(f'a/p/d/ep{LISTENS_LIMIT + 4:02d}_00.vtt', names)
+
+    def test_wal_mode_enabled(self):
+        listens_upsert(self.db, 'a/p/d/x_00.vtt', '00:01:00.000')
+        conn = sqlite3.connect(self.db)
+        mode = conn.execute('PRAGMA journal_mode').fetchone()[0]
+        conn.close()
+        self.assertEqual(mode.lower(), 'wal')
 
 
 if __name__ == '__main__':

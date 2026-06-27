@@ -3,6 +3,7 @@ import fnmatch
 import logging
 import multiprocessing as mp
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -404,6 +405,34 @@ def trigger_reindex(request: Reindex, background_tasks: BackgroundTasks) -> Rein
     return result
 
 
+def detect_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except OSError:
+        return None
+
+
+def ensure_cert(cert_path: Path, key_path: Path):
+    if cert_path.exists() and key_path.exists():
+        return
+    cert_path.parent.mkdir(parents=True, exist_ok=True)
+    sans = ["DNS:localhost", "IP:127.0.0.1"]
+    ip = detect_lan_ip()
+    if ip:
+        sans.append(f"IP:{ip}")
+    subprocess.run([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(key_path), "-out", str(cert_path),
+        "-days", "3650", "-subj", "/CN=uttale",
+        "-addext", f"subjectAltName={','.join(sans)}",
+    ], check=True)
+    logging.info(f"Generated self-signed cert for {sans} at {cert_path}")
+
+
 def main():
     global args
     parser = ArgumentParserWithDefaults(
@@ -435,6 +464,9 @@ def main():
         help="Reindex VTT files and exit. Optional PATTERN for case-insensitive wildcard filtering "
         "(e.g., '202510 kontakt' matches files containing both terms, spaces act as wildcards)",
     )
+    parser.add_argument("--ssl", action="store_true", help="Serve over HTTPS with a self-signed cert")
+    parser.add_argument("--ssl-cert", default=str(Path.home() / ".cache/srst-uttale/cert.pem"), help="TLS certificate path")
+    parser.add_argument("--ssl-key", default=str(Path.home() / ".cache/srst-uttale/key.pem"), help="TLS private key path")
     args = parser.parse_args()
     init_database()
     if args.reindex is not None:
@@ -443,7 +475,12 @@ def main():
         iface, port = args.iface.split(":")
     except:
         exit(1)
-    uvicorn.run(app, host=iface, port=int(port))
+    ssl_kwargs = {}
+    if args.ssl:
+        cert, key = Path(args.ssl_cert), Path(args.ssl_key)
+        ensure_cert(cert, key)
+        ssl_kwargs = {"ssl_certfile": str(cert), "ssl_keyfile": str(key)}
+    uvicorn.run(app, host=iface, port=int(port), **ssl_kwargs)
 
 
 if __name__ == "__main__":

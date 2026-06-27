@@ -382,7 +382,7 @@ def play(
 @app.head("/uttale/Audio")
 @app.get("/uttale/Audio")
 def audio_endpoint(
-    filename: str, start: str, end: str, range_header: str = Header(None)
+    filename: str, start: str, end: str, range_header: str = Header(None, alias="Range")
 ) -> Response:
     """Extract audio segment"""
     audio_data, headers = get_audio_segment(filename, start, end, range_header)

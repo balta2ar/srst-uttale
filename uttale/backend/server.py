@@ -85,7 +85,8 @@ class FavoriteAdd(BaseModel):
 class FavoriteUpdate(BaseModel):
     filename: str
     start: str
-    comment: str = ""
+    comment: Optional[str] = None
+    set_exported: bool = False
 
 
 class ArgumentParserWithDefaults(argparse.ArgumentParser):
@@ -212,11 +213,23 @@ def favorites_add(
     return favorites_get(db_path, filename, start)
 
 
-def favorites_update(db_path: str, filename: str, start: str, comment: str) -> Optional[dict]:
+def favorites_update(
+    db_path: str, filename: str, start: str, comment: Optional[str] = None, set_exported: bool = False
+) -> Optional[dict]:
+    now = now_iso()
+    sets = ["updated_at = ?"]
+    values = [now]
+    if comment is not None:
+        sets.append("comment = ?")
+        values.append(comment)
+    if set_exported:
+        sets.append("exported_at = ?")
+        values.append(now)
+    values.extend([filename, start])
     with favorites_db(db_path) as conn:
         cur = conn.execute(
-            "UPDATE favorites SET comment = ?, updated_at = ? WHERE filename = ? AND start = ?",
-            (comment, now_iso(), filename, start),
+            f"UPDATE favorites SET {', '.join(sets)} WHERE filename = ? AND start = ?",
+            values,
         )
         if cur.rowcount == 0:
             return None
@@ -557,9 +570,11 @@ def favorites_create(fav: FavoriteAdd) -> Favorite:
 
 @app.post("/uttale/Favorites/Update", response_model=Favorite)
 def favorites_set_comment(fav: FavoriteUpdate) -> Favorite:
-    """Update the comment on an existing favorite"""
+    """Update a favorite's comment and/or stamp exported_at"""
     try:
-        row = favorites_update(favorites_db_path(), fav.filename, fav.start, fav.comment)
+        row = favorites_update(
+            favorites_db_path(), fav.filename, fav.start, fav.comment, fav.set_exported
+        )
     except sqlite3.Error:
         raise HTTPException(status_code=500, detail="Favorite update failed")
     if row is None:

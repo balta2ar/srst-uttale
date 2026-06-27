@@ -252,6 +252,24 @@ class TestFavorites(unittest.TestCase):
     def test_update_missing_returns_none(self):
         self.assertIsNone(favorites_update(self.db, 'nope.vtt', '00:00:01.000', 'x'))
 
+    def test_update_set_exported_stamps_exported_at(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '00:00:02.000', 'hi', 'one')
+        updated = favorites_update(self.db, 'a.vtt', '00:00:01.000', set_exported=True)
+        self.assertTrue(updated['exported_at'])
+        self.assertEqual(updated['comment'], 'one')
+
+    def test_update_set_exported_preserves_comment_when_omitted(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '00:00:02.000', 'hi', 'keep')
+        favorites_update(self.db, 'a.vtt', '00:00:01.000', set_exported=True)
+        row = favorites_get(self.db, 'a.vtt', '00:00:01.000')
+        self.assertEqual(row['comment'], 'keep')
+        self.assertTrue(row['exported_at'])
+
+    def test_update_comment_does_not_set_exported(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '00:00:02.000', 'hi', 'one')
+        updated = favorites_update(self.db, 'a.vtt', '00:00:01.000', 'changed')
+        self.assertIsNone(updated['exported_at'])
+
     def test_delete_existing_returns_true(self):
         favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
         self.assertTrue(favorites_delete(self.db, 'a.vtt', '00:00:01.000'))

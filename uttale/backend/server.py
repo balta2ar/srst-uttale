@@ -3,6 +3,7 @@ import fnmatch
 import logging
 import multiprocessing as mp
 import os
+import re
 import socket
 import sqlite3
 import subprocess
@@ -12,7 +13,7 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from os.path import exists, join, relpath, splitext
+from os.path import dirname, exists, join, relpath, splitext
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -87,6 +88,17 @@ class FavoriteUpdate(BaseModel):
     start: str
     comment: Optional[str] = None
     set_exported: bool = False
+
+
+class Topic(BaseModel):
+    title: str
+    start: str
+
+
+class Topics(BaseModel):
+    filename: str = ""
+    results_count: int = 0
+    results: list[Topic] = []
 
 
 class ArgumentParserWithDefaults(argparse.ArgumentParser):
@@ -250,6 +262,37 @@ def parse_time(t: str) -> float:
     return int(h) * 3600 + int(m) * 60 + float(s) + int(ms) / 1000
 
 
+TOPIC_TIME_RE = re.compile(r"^(\d{1,2}):([0-5]?\d):([0-5]?\d)(\.\d{1,3})?$")
+
+
+def parse_topic_time(token: str) -> Optional[str]:
+    m = TOPIC_TIME_RE.match(token)
+    if not m:
+        return None
+    h, mm, ss, frac = m.groups()
+    return f"{int(h):02d}:{int(mm):02d}:{int(ss):02d}{frac or '.000'}"
+
+
+def read_topics(root: str, filename: str) -> List[Topic]:
+    path = join(dirname(join(root, filename)), "topics")
+    if not exists(path):
+        return []
+    topics = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                parts = line.strip().split(maxsplit=1)
+                if len(parts) != 2:
+                    continue
+                start = parse_topic_time(parts[0])
+                if start is None:
+                    continue
+                topics.append(Topic(title=parts[1].strip(), start=start))
+    except OSError:
+        return []
+    return topics
+
+
 def process_vtt(vtt: str, root: str) -> List[tuple]:
     abs_vtt = join(root, vtt)
     rel_vtt = relpath(abs_vtt, root)
@@ -400,6 +443,13 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
     except:
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
     return result
+
+
+@app.get("/uttale/Topics", response_model=Topics)
+def topics(filename: str) -> Topics:
+    """Return background-generated topic markers for a podcast"""
+    results = read_topics(args.root, filename)
+    return Topics(filename=filename, results=results, results_count=len(results))
 
 
 def get_audio_segment(

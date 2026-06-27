@@ -18,6 +18,8 @@ from uttale.backend.server import (
     favorites_list,
     favorites_update,
     favorites_delete,
+    parse_topic_time,
+    read_topics,
 )
 
 
@@ -277,6 +279,67 @@ class TestFavorites(unittest.TestCase):
 
     def test_delete_missing_returns_false(self):
         self.assertFalse(favorites_delete(self.db, 'nope.vtt', '00:00:01.000'))
+
+
+class TestParseTopicTime(unittest.TestCase):
+    def test_pads_missing_milliseconds(self):
+        self.assertEqual(parse_topic_time('00:00:39'), '00:00:39.000')
+
+    def test_passes_through_milliseconds(self):
+        self.assertEqual(parse_topic_time('00:00:39.240'), '00:00:39.240')
+
+    def test_normalizes_single_digit_fields(self):
+        self.assertEqual(parse_topic_time('1:2:3'), '01:02:03.000')
+
+    def test_rejects_non_timestamp(self):
+        self.assertIsNone(parse_topic_time('Velkommen'))
+
+    def test_rejects_out_of_range_minutes(self):
+        self.assertIsNone(parse_topic_time('00:99:00'))
+
+
+class TestReadTopics(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.filename = os.path.join('48k', 'Pod', '20260623', 'by10m', 'by10m_00.vtt')
+        self.episode_dir = os.path.join(self.root, os.path.dirname(self.filename))
+        os.makedirs(self.episode_dir)
+        self.topics_path = os.path.join(self.episode_dir, 'topics')
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def write(self, text):
+        with open(self.topics_path, 'w', encoding='utf-8') as f:
+            f.write(text)
+
+    def test_missing_file_returns_empty(self):
+        self.assertEqual(read_topics(self.root, self.filename), [])
+
+    def test_parses_lines(self):
+        self.write('00:00:39 Velkommen tilbake\n00:00:58 Kevins jobb\n')
+        topics = read_topics(self.root, self.filename)
+        self.assertEqual(len(topics), 2)
+        self.assertEqual(topics[0].start, '00:00:39.000')
+        self.assertEqual(topics[0].title, 'Velkommen tilbake')
+        self.assertEqual(topics[1].start, '00:00:58.000')
+
+    def test_title_with_colons_preserved(self):
+        self.write('00:03:47 Rondane: pakking 10:00 sekk\n')
+        topics = read_topics(self.root, self.filename)
+        self.assertEqual(topics[0].start, '00:03:47.000')
+        self.assertEqual(topics[0].title, 'Rondane: pakking 10:00 sekk')
+
+    def test_skips_blank_and_malformed_lines(self):
+        self.write('\n00:00:39 ok\nno timestamp here\n   \nbad:time:x junk\n00:01:00 also ok\n')
+        topics = read_topics(self.root, self.filename)
+        self.assertEqual([t.start for t in topics], ['00:00:39.000', '00:01:00.000'])
+
+    def test_skips_timestamp_only_line(self):
+        self.write('00:00:39\n00:00:58 has title\n')
+        topics = read_topics(self.root, self.filename)
+        self.assertEqual(len(topics), 1)
+        self.assertEqual(topics[0].title, 'has title')
 
 
 if __name__ == '__main__':

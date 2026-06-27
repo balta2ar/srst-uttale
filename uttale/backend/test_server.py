@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import fnmatch
 import sqlite3
+import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -190,17 +191,50 @@ class TestFavorites(unittest.TestCase):
         rows = favorites_list(self.db)
         self.assertEqual(len(rows), 1)
 
-    def test_list_all_and_ordered(self):
+    def test_list_default_sort_is_created_desc(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
+        time.sleep(0.01)
+        favorites_add(self.db, 'b.vtt', '00:00:02.000', '', '', '')
+        time.sleep(0.01)
+        favorites_add(self.db, 'c.vtt', '00:00:03.000', '', '', '')
+        keys = [r['filename'] for r in favorites_list(self.db)]
+        self.assertEqual(keys, ['c.vtt', 'b.vtt', 'a.vtt'])
+
+    def test_list_sort_created_asc(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
+        time.sleep(0.01)
+        favorites_add(self.db, 'b.vtt', '00:00:02.000', '', '', '')
+        keys = [r['filename'] for r in favorites_list(self.db, sort='created_asc')]
+        self.assertEqual(keys, ['a.vtt', 'b.vtt'])
+
+    def test_list_sort_name_asc(self):
         favorites_add(self.db, 'b.vtt', '00:00:01.000', '', '', '')
         favorites_add(self.db, 'a.vtt', '00:00:09.000', '', '', '')
         favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
-        rows = favorites_list(self.db)
-        keys = [(r['filename'], r['start']) for r in rows]
+        keys = [(r['filename'], r['start']) for r in favorites_list(self.db, sort='name_asc')]
         self.assertEqual(keys, [
             ('a.vtt', '00:00:01.000'),
             ('a.vtt', '00:00:09.000'),
             ('b.vtt', '00:00:01.000'),
         ])
+
+    def test_list_sort_name_desc(self):
+        favorites_add(self.db, 'b.vtt', '00:00:01.000', '', '', '')
+        favorites_add(self.db, 'a.vtt', '00:00:09.000', '', '', '')
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
+        keys = [(r['filename'], r['start']) for r in favorites_list(self.db, sort='name_desc')]
+        self.assertEqual(keys, [
+            ('b.vtt', '00:00:01.000'),
+            ('a.vtt', '00:00:09.000'),
+            ('a.vtt', '00:00:01.000'),
+        ])
+
+    def test_list_unknown_sort_falls_back_to_created_desc(self):
+        favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')
+        time.sleep(0.01)
+        favorites_add(self.db, 'b.vtt', '00:00:02.000', '', '', '')
+        keys = [r['filename'] for r in favorites_list(self.db, sort='bogus')]
+        self.assertEqual(keys, ['b.vtt', 'a.vtt'])
 
     def test_list_filtered_by_filename(self):
         favorites_add(self.db, 'a.vtt', '00:00:01.000', '', '', '')

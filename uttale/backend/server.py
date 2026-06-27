@@ -174,16 +174,25 @@ def favorites_get(db_path: str, filename: str, start: str) -> Optional[dict]:
         return dict(row) if row else None
 
 
-def favorites_list(db_path: str, filename: Optional[str] = None) -> List[dict]:
+FAVORITES_SORTS = {
+    "created_desc": "created_at DESC",
+    "created_asc": "created_at ASC",
+    "name_asc": "filename ASC, start ASC",
+    "name_desc": "filename DESC, start DESC",
+}
+
+
+def favorites_list(db_path: str, filename: Optional[str] = None, sort: str = "created_desc") -> List[dict]:
+    order_by = FAVORITES_SORTS.get(sort, FAVORITES_SORTS["created_desc"])
     with favorites_db(db_path) as conn:
         if filename:
             rows = conn.execute(
-                "SELECT * FROM favorites WHERE LOWER(filename) LIKE LOWER(?) ORDER BY filename, start",
+                f"SELECT * FROM favorites WHERE LOWER(filename) LIKE LOWER(?) ORDER BY {order_by}",
                 (f"%{filename}%",),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM favorites ORDER BY filename, start"
+                f"SELECT * FROM favorites ORDER BY {order_by}"
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -521,10 +530,10 @@ def favorites_db_path() -> str:
 
 
 @app.get("/uttale/Favorites", response_model=Favorites)
-def favorites_index(filename: str = "") -> Favorites:
-    """List favorites, optionally filtered by filename"""
+def favorites_index(filename: str = "", sort: str = "created_desc") -> Favorites:
+    """List favorites, optionally filtered by filename and sorted"""
     try:
-        rows = favorites_list(favorites_db_path(), filename or None)
+        rows = favorites_list(favorites_db_path(), filename or None, sort)
     except sqlite3.Error:
         raise HTTPException(status_code=500, detail="Favorites query failed")
     return Favorites(

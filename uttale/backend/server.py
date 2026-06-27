@@ -4,14 +4,17 @@ import logging
 import multiprocessing as mp
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from os.path import exists, join, relpath, splitext
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import duckdb
 import polars as pl
@@ -52,6 +55,37 @@ class Reindex(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str
+
+
+class Favorite(BaseModel):
+    filename: str
+    start: str
+    end: str = ""
+    text: str = ""
+    comment: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    exported_at: Optional[str] = None
+
+
+class Favorites(BaseModel):
+    filename: str = ""
+    results_count: int = 0
+    results: list[Favorite] = []
+
+
+class FavoriteAdd(BaseModel):
+    filename: str
+    start: str
+    end: str = ""
+    text: str = ""
+    comment: str = ""
+
+
+class FavoriteUpdate(BaseModel):
+    filename: str
+    start: str
+    comment: str = ""
 
 
 class ArgumentParserWithDefaults(argparse.ArgumentParser):
@@ -109,6 +143,83 @@ def init_database():
         "CREATE TABLE IF NOT EXISTS lines (filename VARCHAR, start VARCHAR, end_time VARCHAR, text VARCHAR)"
     )
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS scopes (scope VARCHAR)")
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def favorites_db(db_path: str):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS favorites ("
+            "filename TEXT, start TEXT, end TEXT, text TEXT, comment TEXT DEFAULT '', "
+            "created_at TEXT, updated_at TEXT, exported_at TEXT, "
+            "PRIMARY KEY (filename, start))"
+        )
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def favorites_get(db_path: str, filename: str, start: str) -> Optional[dict]:
+    with favorites_db(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM favorites WHERE filename = ? AND start = ?", (filename, start)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def favorites_list(db_path: str, filename: Optional[str] = None) -> List[dict]:
+    with favorites_db(db_path) as conn:
+        if filename:
+            rows = conn.execute(
+                "SELECT * FROM favorites WHERE LOWER(filename) LIKE LOWER(?) ORDER BY filename, start",
+                (f"%{filename}%",),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM favorites ORDER BY filename, start"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def favorites_add(
+    db_path: str, filename: str, start: str, end: str = "", text: str = "", comment: str = ""
+) -> dict:
+    now = now_iso()
+    with favorites_db(db_path) as conn:
+        conn.execute(
+            "INSERT INTO favorites (filename, start, end, text, comment, created_at, updated_at, exported_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
+            "ON CONFLICT(filename, start) DO UPDATE SET "
+            "end = excluded.end, text = excluded.text, comment = excluded.comment, updated_at = excluded.updated_at",
+            (filename, start, end, text, comment, now, now),
+        )
+    return favorites_get(db_path, filename, start)
+
+
+def favorites_update(db_path: str, filename: str, start: str, comment: str) -> Optional[dict]:
+    with favorites_db(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE favorites SET comment = ?, updated_at = ? WHERE filename = ? AND start = ?",
+            (comment, now_iso(), filename, start),
+        )
+        if cur.rowcount == 0:
+            return None
+    return favorites_get(db_path, filename, start)
+
+
+def favorites_delete(db_path: str, filename: str, start: str) -> bool:
+    with favorites_db(db_path) as conn:
+        cur = conn.execute(
+            "DELETE FROM favorites WHERE filename = ? AND start = ?", (filename, start)
+        )
+        return cur.rowcount > 0
 
 
 def parse_time(t: str) -> float:
@@ -405,6 +516,66 @@ def trigger_reindex(request: Reindex, background_tasks: BackgroundTasks) -> Rein
     return result
 
 
+def favorites_db_path() -> str:
+    return resolve_db_path(args.favorites_db)
+
+
+@app.get("/uttale/Favorites", response_model=Favorites)
+def favorites_index(filename: str = "") -> Favorites:
+    """List favorites, optionally filtered by filename"""
+    try:
+        rows = favorites_list(favorites_db_path(), filename or None)
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Favorites query failed")
+    return Favorites(
+        filename=filename,
+        results=[Favorite(**row) for row in rows],
+        results_count=len(rows),
+    )
+
+
+@app.post("/uttale/Favorites", response_model=Favorite)
+def favorites_create(fav: FavoriteAdd) -> Favorite:
+    """Add (upsert) a favorite"""
+    try:
+        row = favorites_add(
+            favorites_db_path(), fav.filename, fav.start, fav.end, fav.text, fav.comment
+        )
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Favorite add failed")
+    return Favorite(**row)
+
+
+@app.post("/uttale/Favorites/Update", response_model=Favorite)
+def favorites_set_comment(fav: FavoriteUpdate) -> Favorite:
+    """Update the comment on an existing favorite"""
+    try:
+        row = favorites_update(favorites_db_path(), fav.filename, fav.start, fav.comment)
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Favorite update failed")
+    if row is None:
+        raise HTTPException(status_code=404, detail="Favorite not found")
+    return Favorite(**row)
+
+
+@app.delete("/uttale/Favorites", response_model=StatusResponse)
+def favorites_remove(filename: str, start: str) -> StatusResponse:
+    """Delete a favorite by (filename, start)"""
+    try:
+        deleted = favorites_delete(favorites_db_path(), filename, start)
+    except sqlite3.Error:
+        raise HTTPException(status_code=500, detail="Favorite delete failed")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Favorite not found")
+    return StatusResponse(status="deleted")
+
+
+@app.post("/uttale/Favorites/Export", response_model=StatusResponse)
+def favorites_export() -> StatusResponse:
+    """Export favorites (stub; real export lands later)"""
+    return StatusResponse(status="not implemented")
+
+
 def detect_lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -454,6 +625,12 @@ def main():
         default="lines_duckdb.db",
         help="Database file path. Simple filename (e.g., '202510.db') is stored in ~/.cache/srst-uttale/, "
         "otherwise path is used as-is (e.g., './test.db' or '/tmp/line.db')",
+    )
+    parser.add_argument(
+        "--favorites-db",
+        default="favorites.db",
+        help="Favorites SQLite database path. Same path rules as --db "
+        "(simple filename goes to ~/.cache/srst-uttale/)",
     )
     parser.add_argument(
         "--reindex",

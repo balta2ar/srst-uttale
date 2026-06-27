@@ -28,15 +28,25 @@ See also `STYLE.md` (no comments, compact, short imports).
   `~/.cache/srst-uttale/`) serves HTTPS. CORS + `Vary: Origin` are configured for
   harken cross-origin during dev.
 * Tests: `uttale/backend/test_server.py` uses `unittest` + temp dirs to test
-  helpers. Add favorites helper tests there in the same style.
-* venv python: `.venv/bin/python` (python 3.12). The deployed process may run
-  under system python3.13 site-packages; **restart the backend** to pick up code
-  changes (it has run over HTTPS on :7010).
-* Current cross-repo task: a global "favorites" feature. The UI side
-  (`srst-harken`) holds the design spec:
-  `srst-harken/docs/specs/2026-06-27-favorites-design.md`. Backend work for it:
-  a NEW separate **SQLite** DB (stdlib `sqlite3`, opened/closed per request via a
-  context-manager helper), configured by a new `--favorites-db` arg (default
-  `~/.cache/srst-uttale/favorites.db`), plus `Favorite`/`Favorites` models and
-  `Favorites` Add/List/Update/Delete/Export endpoints. See the spec for the exact
-  schema, endpoints, and semantics.
+  helpers. Add favorites helper tests there in the same style. Run with
+  `make test` (`python3 -m unittest uttale.backend.test_server -v`).
+* Env: there is NO working in-repo venv here — `.venv/bin/python` is a broken
+  symlink to system python3.14, and system pythons lack `polars`/`webvtt`, so
+  `server.py` can't even import. To RUN tests in a sandbox, use uv:
+  `uv venv /tmp/opencode/uttale-test --python 3.12` then
+  `uv pip install --python /tmp/opencode/uttale-test/bin/python duckdb polars
+  uvicorn webvtt-py fastapi pydantic tqdm httpx` (httpx only needed for
+  starlette TestClient). The deployed server is an **editable uv tool**
+  (`uv tool list` shows `uttale`; installed from this repo with `editable:true`)
+  that imports `server.py` directly from this working tree, so a plain
+  **restart** picks up code changes — no reinstall needed. It runs over HTTPS on
+  :7010, e.g. `srst-uttale-backend-api --db root.db --root <audio_root> --ssl`.
+* Cross-repo "favorites" feature: the backend side is **implemented** in
+  `server.py` — a separate **SQLite** store (stdlib `sqlite3`, opened/closed per
+  request via the `favorites_db()` context manager), `--favorites-db` arg
+  (default `~/.cache/srst-uttale/favorites.db`), `Favorite`/`Favorites` models,
+  helpers `favorites_add/get/list/update/delete`, and endpoints under
+  `/uttale/Favorites` (GET list, POST add/upsert, POST `/Update` comment,
+  DELETE by `?filename=&start=`, POST `/Export` no-op stub). Tests in
+  `test_server.py::TestFavorites`. The UI side (`srst-harken`) and the design
+  spec live at `srst-harken/docs/specs/2026-06-27-favorites-design.md`.

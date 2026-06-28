@@ -592,5 +592,87 @@ class TestDiscoverVtts(unittest.TestCase):
         self.assertEqual(len(found), 1)
 
 
+class TestReindexWrite(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.dbfile = os.path.join(tempfile.mkdtemp(), 'lines.db')
+        self._saved_args = server.args
+        self._saved_db = server.db_duckdb
+        server.args = SimpleNamespace(db=self.dbfile, root=self.root)
+        server.init_database()
+
+    def tearDown(self):
+        try:
+            server.db_duckdb.close()
+        except Exception:
+            pass
+        server.args = self._saved_args
+        server.db_duckdb = self._saved_db
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(self.dbfile), ignore_errors=True)
+
+    def make_vtt(self, rel, lines):
+        p = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        body = "WEBVTT\n\n"
+        t = 0
+        for text in lines:
+            body += f"00:00:0{t}.000 --> 00:00:0{t+1}.000\n{text}\n\n"
+            t += 1
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write(body)
+        return rel
+
+    def line_count(self):
+        return server.db_duckdb.execute("SELECT COUNT(*) FROM lines").fetchone()[0]
+
+    def scopes_for(self, like):
+        return server.db_duckdb.execute(
+            "SELECT scope FROM scopes WHERE scope LIKE ?", (like,)).fetchall()
+
+    def test_pattern_reindex_is_idempotent(self):
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'),
+                      ['one', 'two', 'three'])
+        n1 = server.reindex(self.root, 'idioti')
+        c1 = self.line_count()
+        n2 = server.reindex(self.root, 'idioti')
+        c2 = self.line_count()
+        self.assertEqual(n1, 1)
+        self.assertEqual(n2, 1)
+        self.assertEqual(c1, 3)
+        self.assertEqual(c2, 3)
+
+    def test_pattern_reindex_picks_up_edits(self):
+        rel = self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'),
+                            ['one', 'two'])
+        server.reindex(self.root, 'idioti')
+        self.assertEqual(self.line_count(), 2)
+        self.make_vtt(rel, ['one', 'two', 'three', 'four'])
+        server.reindex(self.root, 'idioti')
+        self.assertEqual(self.line_count(), 4)
+
+    def test_pattern_reindex_does_not_touch_unmatched(self):
+        server.db_duckdb.execute(
+            "INSERT INTO lines VALUES ('48k/other/20200101/by10m/z.vtt','00:00:00.000','00:00:01.000','keep')")
+        server.db_duckdb.execute("INSERT INTO scopes VALUES ('48k/other/20200101/by10m/z.vtt')")
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'), ['x'])
+        server.reindex(self.root, 'idioti')
+        kept = server.db_duckdb.execute(
+            "SELECT COUNT(*) FROM lines WHERE filename = '48k/other/20200101/by10m/z.vtt'").fetchone()[0]
+        self.assertEqual(kept, 1)
+        self.assertEqual(len(self.scopes_for('%idioti%')), 1)
+
+    def test_full_rebuild_clears_stale_rows(self):
+        server.db_duckdb.execute(
+            "INSERT INTO lines VALUES ('48k/gone/20200101/by10m/z.vtt','00:00:00.000','00:00:01.000','stale')")
+        server.db_duckdb.execute("INSERT INTO scopes VALUES ('48k/gone/20200101/by10m/z.vtt')")
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'), ['x'])
+        server.reindex(self.root, '')
+        gone = server.db_duckdb.execute(
+            "SELECT COUNT(*) FROM lines WHERE filename = '48k/gone/20200101/by10m/z.vtt'").fetchone()[0]
+        self.assertEqual(gone, 0)
+        self.assertEqual(self.line_count(), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

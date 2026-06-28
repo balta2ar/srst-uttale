@@ -1,5 +1,4 @@
 import argparse
-import fnmatch
 import hashlib
 import logging
 import multiprocessing as mp
@@ -502,24 +501,11 @@ def discover_vtts(root: str, pattern: str = "", limit=None) -> list:
         return []
 
 
-def reindex(root: str, pattern: str = ""):
-    try:
-        fd = subprocess.run(
-            ["fd", "--type", "f", "--extension", "vtt", "--base-directory", root],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        vtt_files = fd.stdout.splitlines()
-    except:
-        vtt_files = []
-
-    if pattern:
-        wildcard = pattern_to_wildcard(pattern)
-        vtt_files = [f for f in vtt_files if fnmatch.fnmatch(f.lower(), wildcard)]
+def reindex(root: str, pattern: str = "", limit=None) -> int:
+    vtt_files = discover_vtts(root, pattern, limit)
     total_files = len(vtt_files)
     if not vtt_files:
-        return
+        return 0
     manager = mp.Manager()
     return_dict = manager.dict()
     counter = manager.Value("i", 0)
@@ -548,9 +534,22 @@ def reindex(root: str, pattern: str = ""):
     all_rows = []
     for idx in range(len(chunks)):
         all_rows.extend(return_dict.get(idx, []))
-    if all_rows:
-        df = pl.DataFrame(all_rows, schema=["filename", "start", "end_time", "text"])
-        db_duckdb.register("df", df)
+    df = pl.DataFrame(all_rows, schema=["filename", "start", "end_time", "text"])
+    db_duckdb.register("df", df)
+    if pattern:
+        db_duckdb.execute(
+            "DELETE FROM lines WHERE filename IN (SELECT DISTINCT filename FROM df)"
+        )
+        db_duckdb.execute(
+            "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
+        )
+        db_duckdb.execute(
+            "DELETE FROM scopes WHERE scope IN (SELECT DISTINCT filename FROM df)"
+        )
+        db_duckdb.execute(
+            "INSERT INTO scopes SELECT DISTINCT filename FROM df WHERE filename IN (SELECT DISTINCT filename FROM lines)"
+        )
+    else:
         db_duckdb.execute("DELETE FROM lines")
         db_duckdb.execute(
             "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
@@ -559,8 +558,9 @@ def reindex(root: str, pattern: str = ""):
         db_duckdb.execute(
             "INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope"
         )
-        db_duckdb.unregister("df")
+    db_duckdb.unregister("df")
     db_duckdb.commit()
+    return total_files
 
 
 @app.get("/uttale/Scopes", response_model=Scopes)

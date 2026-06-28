@@ -5,11 +5,14 @@ import tempfile
 import shutil
 import fnmatch
 import sqlite3
+import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+from uttale.backend import server
 from uttale.backend.server import (
     resolve_db_path,
     pattern_to_wildcard,
@@ -28,6 +31,8 @@ from uttale.backend.server import (
     listens_upsert,
     listens_list,
     LISTENS_LIMIT,
+    audio_etag,
+    get_audio_segment,
 )
 
 
@@ -429,6 +434,41 @@ class TestGenerateTopics(unittest.TestCase):
         with open(self.topics_path, encoding='utf-8') as f:
             self.assertIn('00:00:10 Intro', f.read())
         self.assertNotIn(os.path.realpath(self.episode_dir), _topics_running)
+
+
+class TestAudioCaching(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.filename = os.path.join('48k', 'Pod', '20260628', 'by10m', 'by10m_00.vtt')
+        ogg = os.path.join(self.root, os.path.dirname(self.filename), 'by10m_00.ogg')
+        os.makedirs(os.path.dirname(ogg))
+        subprocess.run(
+            ['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono',
+             '-t', '2', '-c:a', 'libopus', ogg],
+            capture_output=True, check=True,
+        )
+        self._orig_args = server.args
+        server.args = SimpleNamespace(root=self.root)
+
+    def tearDown(self):
+        server.args = self._orig_args
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_etag_is_stable_for_a_span(self):
+        a = audio_etag(self.filename, '00:00:00.000', '00:00:01.000')
+        b = audio_etag(self.filename, '00:00:00.000', '00:00:01.000')
+        self.assertEqual(a, b)
+        self.assertTrue(a.startswith('"') and a.endswith('"'))
+
+    def test_etag_differs_across_spans(self):
+        a = audio_etag(self.filename, '00:00:00.000', '00:00:01.000')
+        b = audio_etag(self.filename, '00:00:00.000', '00:00:01.500')
+        self.assertNotEqual(a, b)
+
+    def test_segment_headers_include_etag_and_immutable(self):
+        _data, headers = get_audio_segment(self.filename, '00:00:00.000', '00:00:01.000')
+        self.assertEqual(headers['ETag'], audio_etag(self.filename, '00:00:00.000', '00:00:01.000'))
+        self.assertIn('immutable', headers['Cache-Control'])
 
 
 class TestListens(unittest.TestCase):

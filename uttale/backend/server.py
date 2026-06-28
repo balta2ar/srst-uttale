@@ -1,5 +1,6 @@
 import argparse
 import fnmatch
+import hashlib
 import logging
 import multiprocessing as mp
 import os
@@ -593,6 +594,11 @@ def generate_topics(request: GenerateTopicsRequest) -> GenerateTopics:
     return GenerateTopics(filename=request.filename, status=status)
 
 
+def audio_etag(filename: str, start: str, end: str) -> str:
+    digest = hashlib.sha1(f"{filename}|{start}|{end}".encode("utf-8")).hexdigest()
+    return f'"{digest}"'
+
+
 def get_audio_segment(
     filename: str, start: str, end: str, range_header: str = None
 ) -> tuple[bytes, dict]:
@@ -668,7 +674,10 @@ def get_audio_segment(
             capture_output=True,
             check=True,
         )
-        return proc.stdout, {"Cache-Control": "max-age=86400"}
+        return proc.stdout, {
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "ETag": audio_etag(filename, start, end),
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid time format") from e

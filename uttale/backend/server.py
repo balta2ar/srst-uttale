@@ -472,17 +472,6 @@ def update_progress(
         pbar.refresh()
 
 
-def pattern_to_wildcard(pattern: str) -> str:
-    """Convert user pattern to wildcard expression"""
-    if not pattern:
-        return "*"
-    parts = pattern.strip().split()
-    if not parts:
-        return "*"
-    wildcard = "*" + "*".join(parts) + "*"
-    return wildcard.lower()
-
-
 def pattern_to_fd_regex(pattern: str) -> str:
     parts = pattern.strip().split()
     if not parts:
@@ -526,7 +515,7 @@ def start_reindex(root: str, pattern: str, limit: int) -> dict:
     def worker():
         global _reindex_running
         try:
-            reindex(root, pattern, limit)
+            reindex(root, pattern, limit, files=vtt_files)
         finally:
             with _reindex_lock:
                 _reindex_running = False
@@ -535,12 +524,13 @@ def start_reindex(root: str, pattern: str, limit: int) -> dict:
     return {"status": "started", "matched": matched, "truncated": truncated}
 
 
-def reindex(root: str, pattern: str = "", limit=None) -> int:
-    vtt_files = discover_vtts(root, pattern, limit)
+def reindex(root: str, pattern: str = "", limit=None, files=None) -> int:
+    vtt_files = files if files is not None else discover_vtts(root, pattern, limit)
     total_files = len(vtt_files)
     if not vtt_files:
         return 0
-    manager = mp.Manager()
+    ctx = mp.get_context("spawn")
+    manager = ctx.Manager()
     return_dict = manager.dict()
     counter = manager.Value("i", 0)
     lock = manager.Lock()
@@ -549,7 +539,7 @@ def reindex(root: str, pattern: str = "", limit=None) -> int:
     chunks = [vtt_files[i : i + chunk_size] for i in range(0, total_files, chunk_size)]
     jobs = []
     for idx, chunk in enumerate(chunks):
-        p = mp.Process(
+        p = ctx.Process(
             target=reindex_worker_duckdb,
             args=(chunk, root, return_dict, idx, counter, lock),
         )
@@ -570,30 +560,33 @@ def reindex(root: str, pattern: str = "", limit=None) -> int:
         all_rows.extend(return_dict.get(idx, []))
     df = pl.DataFrame(all_rows, schema=["filename", "start", "end_time", "text"])
     db_duckdb.register("df", df)
-    if pattern:
-        db_duckdb.execute(
-            "DELETE FROM lines WHERE filename IN (SELECT DISTINCT filename FROM df)"
-        )
-        db_duckdb.execute(
-            "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
-        )
-        db_duckdb.execute(
-            "DELETE FROM scopes WHERE scope IN (SELECT DISTINCT filename FROM df)"
-        )
-        db_duckdb.execute(
-            "INSERT INTO scopes SELECT DISTINCT filename FROM df WHERE filename IN (SELECT DISTINCT filename FROM lines)"
-        )
-    else:
-        db_duckdb.execute("DELETE FROM lines")
-        db_duckdb.execute(
-            "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
-        )
-        db_duckdb.execute("DELETE FROM scopes")
-        db_duckdb.execute(
-            "INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope"
-        )
-    db_duckdb.unregister("df")
-    db_duckdb.commit()
+    db_duckdb.begin()
+    try:
+        if pattern:
+            db_duckdb.execute(
+                "DELETE FROM lines WHERE filename IN (SELECT DISTINCT filename FROM df)"
+            )
+            db_duckdb.execute(
+                "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
+            )
+            db_duckdb.execute(
+                "DELETE FROM scopes WHERE scope IN (SELECT DISTINCT filename FROM df)"
+            )
+            db_duckdb.execute(
+                "INSERT INTO scopes SELECT DISTINCT filename FROM df WHERE filename IN (SELECT DISTINCT filename FROM lines)"
+            )
+        else:
+            db_duckdb.execute("DELETE FROM lines")
+            db_duckdb.execute(
+                "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
+            )
+            db_duckdb.execute("DELETE FROM scopes")
+            db_duckdb.execute(
+                "INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope"
+            )
+        db_duckdb.commit()
+    finally:
+        db_duckdb.unregister("df")
     return total_files
 
 
@@ -952,8 +945,8 @@ def main():
         const="",
         default=None,
         metavar="PATTERN",
-        help="Reindex VTT files and exit. Optional PATTERN for case-insensitive wildcard filtering "
-        "(e.g., '202510 kontakt' matches files containing both terms, spaces act as wildcards)",
+        help="Reindex VTT files and exit. Optional PATTERN filters by path "
+        "(case-insensitive, space-separated terms matched in order; e.g. '202510 kontakt')",
     )
     parser.add_argument("--ssl", action="store_true", help="Serve over HTTPS with a self-signed cert")
     parser.add_argument("--ssl-cert", default=str(Path.home() / ".cache/srst-uttale/cert.pem"), help="TLS certificate path")

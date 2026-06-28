@@ -3,7 +3,6 @@ import os
 import sys
 import tempfile
 import shutil
-import fnmatch
 import sqlite3
 import subprocess
 import time
@@ -15,7 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from uttale.backend import server
 from uttale.backend.server import (
     resolve_db_path,
-    pattern_to_wildcard,
     favorites_add,
     favorites_get,
     favorites_list,
@@ -86,80 +84,6 @@ class TestDatabasePathResolution(unittest.TestCase):
         self.assertFalse(os.path.exists(cache_dir))
         resolve_db_path('testfile.db')
         self.assertTrue(os.path.exists(cache_dir))
-
-
-class TestWildcardPatterns(unittest.TestCase):
-    def test_empty_pattern(self):
-        self.assertEqual(pattern_to_wildcard(''), '*')
-
-    def test_whitespace_only_pattern(self):
-        self.assertEqual(pattern_to_wildcard('   '), '*')
-        self.assertEqual(pattern_to_wildcard('\t\n'), '*')
-
-    def test_simple_pattern(self):
-        self.assertEqual(pattern_to_wildcard('202510'), '*202510*')
-
-    def test_pattern_with_two_words(self):
-        self.assertEqual(pattern_to_wildcard('202510 kontakt'), '*202510*kontakt*')
-
-    def test_pattern_with_three_words(self):
-        self.assertEqual(pattern_to_wildcard('a b c'), '*a*b*c*')
-
-    def test_pattern_with_extra_spaces(self):
-        self.assertEqual(pattern_to_wildcard('  word1   word2  '), '*word1*word2*')
-
-    def test_pattern_is_lowercase(self):
-        result = pattern_to_wildcard('UPPER Case')
-        self.assertEqual(result, '*upper*case*')
-
-    def test_pattern_with_single_word_and_spaces(self):
-        self.assertEqual(pattern_to_wildcard('  single  '), '*single*')
-
-
-class TestPatternFiltering(unittest.TestCase):
-    def setUp(self):
-        self.test_files = [
-            '2025/202510_kontakt.vtt',
-            '2025/202510_rapport.vtt',
-            '2024/202410_kontakt.vtt',
-            'archive/old_kontakt.vtt',
-            'misc/test.vtt'
-        ]
-
-    def test_filter_with_two_terms(self):
-        pattern = '202510 kontakt'
-        wildcard = pattern_to_wildcard(pattern)
-        filtered = [f for f in self.test_files if fnmatch.fnmatch(f.lower(), wildcard)]
-        self.assertEqual(filtered, ['2025/202510_kontakt.vtt'])
-
-    def test_filter_single_term_multiple_matches(self):
-        pattern = 'kontakt'
-        wildcard = pattern_to_wildcard(pattern)
-        filtered = [f for f in self.test_files if fnmatch.fnmatch(f.lower(), wildcard)]
-        self.assertEqual(len(filtered), 3)
-        self.assertIn('2025/202510_kontakt.vtt', filtered)
-        self.assertIn('2024/202410_kontakt.vtt', filtered)
-        self.assertIn('archive/old_kontakt.vtt', filtered)
-
-    def test_filter_by_year(self):
-        pattern = '2025'
-        wildcard = pattern_to_wildcard(pattern)
-        filtered = [f for f in self.test_files if fnmatch.fnmatch(f.lower(), wildcard)]
-        self.assertEqual(len(filtered), 2)
-        self.assertIn('2025/202510_kontakt.vtt', filtered)
-        self.assertIn('2025/202510_rapport.vtt', filtered)
-
-    def test_filter_no_matches(self):
-        pattern = 'nonexistent'
-        wildcard = pattern_to_wildcard(pattern)
-        filtered = [f for f in self.test_files if fnmatch.fnmatch(f.lower(), wildcard)]
-        self.assertEqual(len(filtered), 0)
-
-    def test_filter_matches_all(self):
-        pattern = ''
-        wildcard = pattern_to_wildcard(pattern)
-        filtered = [f for f in self.test_files if fnmatch.fnmatch(f.lower(), wildcard)]
-        self.assertEqual(len(filtered), len(self.test_files))
 
 
 class TestFavorites(unittest.TestCase):
@@ -741,6 +665,13 @@ class TestReindexEndpoint(unittest.TestCase):
             server._reindex_running = True
         res = server.start_reindex(self.root, 'idioti', server.REINDEX_LIMIT)
         self.assertEqual(res['status'], 'already running')
+
+    def test_reindex_uses_provided_files_over_discovery(self):
+        rel = self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'))
+        n = server.reindex(self.root, 'pattern-that-would-not-match-xyz', None, files=[rel])
+        self.assertEqual(n, 1)
+        cnt = server.db_duckdb.execute("SELECT COUNT(*) FROM lines").fetchone()[0]
+        self.assertEqual(cnt, 1)
 
 
 if __name__ == '__main__':

@@ -20,6 +20,11 @@ from uttale.backend.server import (
     favorites_delete,
     parse_topic_time,
     read_topics,
+    topics_dir_for,
+    run_vtt_topics,
+    start_topics_generation,
+    _topics_running,
+    _topics_lock,
     listens_upsert,
     listens_list,
     LISTENS_LIMIT,
@@ -343,6 +348,87 @@ class TestReadTopics(unittest.TestCase):
         topics = read_topics(self.root, self.filename)
         self.assertEqual(len(topics), 1)
         self.assertEqual(topics[0].title, 'has title')
+
+
+class TestGenerateTopics(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.logs = tempfile.mkdtemp()
+        self.bindir = tempfile.mkdtemp()
+        self.filename = os.path.join('48k', 'Pod', '20260623', 'by10m', 'by10m_00.vtt')
+        self.episode_dir = os.path.join(self.root, os.path.dirname(self.filename))
+        os.makedirs(self.episode_dir)
+        self.topics_path = os.path.join(self.episode_dir, 'topics')
+        self._orig_path = os.environ.get('PATH', '')
+
+    def tearDown(self):
+        os.environ['PATH'] = self._orig_path
+        with _topics_lock:
+            _topics_running.discard(os.path.realpath(self.episode_dir))
+        for d in (self.root, self.logs, self.bindir):
+            shutil.rmtree(d, ignore_errors=True)
+
+    def stub(self, body):
+        path = os.path.join(self.bindir, 'vtt-topics')
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(body)
+        os.chmod(path, 0o755)
+        os.environ['PATH'] = self.bindir + os.pathsep + self._orig_path
+
+    def test_dir_for_resolves_episode_directory(self):
+        self.assertEqual(topics_dir_for(self.root, self.filename), self.episode_dir)
+
+    def test_run_publishes_topics_on_success(self):
+        self.stub('#!/bin/sh\nprintf "00:00:10 Intro\\n00:01:00 Body\\n"\n')
+        code = run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        self.assertEqual(code, 0)
+        with open(self.topics_path, encoding='utf-8') as f:
+            self.assertIn('00:00:10 Intro', f.read())
+
+    def test_run_writes_log_file(self):
+        self.stub('#!/bin/sh\nprintf "00:00:10 Intro\\n"\n')
+        run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        self.assertTrue(any(n.endswith('.log') for n in os.listdir(self.logs)))
+
+    def test_run_keeps_existing_topics_on_failure(self):
+        with open(self.topics_path, 'w', encoding='utf-8') as f:
+            f.write('00:00:05 Keep me\n')
+        self.stub('#!/bin/sh\necho boom >&2\nexit 3\n')
+        code = run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        self.assertEqual(code, 3)
+        with open(self.topics_path, encoding='utf-8') as f:
+            self.assertEqual(f.read(), '00:00:05 Keep me\n')
+
+    def test_run_does_not_publish_empty_output(self):
+        self.stub('#!/bin/sh\nexit 0\n')
+        run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        self.assertFalse(os.path.exists(self.topics_path))
+
+    def test_start_returns_not_found_for_missing_dir(self):
+        missing = os.path.join('48k', 'Nope', '20260101', 'by10m', 'x_00.vtt')
+        self.assertEqual(start_topics_generation(self.root, missing), 'not found')
+
+    def test_start_returns_already_running_when_locked(self):
+        key = os.path.realpath(self.episode_dir)
+        with _topics_lock:
+            _topics_running.add(key)
+        try:
+            self.assertEqual(start_topics_generation(self.root, self.filename), 'already running')
+        finally:
+            with _topics_lock:
+                _topics_running.discard(key)
+
+    def test_start_runs_and_publishes(self):
+        self.stub('#!/bin/sh\nprintf "00:00:10 Intro\\n"\n')
+        status = start_topics_generation(self.root, self.filename, log_dir=self.logs)
+        self.assertEqual(status, 'started')
+        for _ in range(50):
+            if os.path.exists(self.topics_path):
+                break
+            time.sleep(0.05)
+        with open(self.topics_path, encoding='utf-8') as f:
+            self.assertIn('00:00:10 Intro', f.read())
+        self.assertNotIn(os.path.realpath(self.episode_dir), _topics_running)
 
 
 class TestListens(unittest.TestCase):

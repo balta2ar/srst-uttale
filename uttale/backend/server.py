@@ -100,6 +100,15 @@ class Topics(BaseModel):
     results: list[Topic] = []
 
 
+class GenerateTopicsRequest(BaseModel):
+    filename: str
+
+
+class GenerateTopics(BaseModel):
+    filename: str = ""
+    status: str = ""
+
+
 class Listen(BaseModel):
     filename: str
     position: str
@@ -356,7 +365,69 @@ def read_topics(root: str, filename: str) -> List[Topic]:
     return topics
 
 
-def process_vtt(vtt: str, root: str) -> List[tuple]:
+TOPICS_LOG_DIR = "/tmp/vtt-topics"
+_topics_running: set = set()
+_topics_lock = threading.Lock()
+
+
+def topics_dir_for(root: str, filename: str) -> str:
+    return dirname(join(root, filename))
+
+
+def run_vtt_topics(topic_dir: str, log_dir: str = TOPICS_LOG_DIR) -> int:
+    os.makedirs(log_dir, exist_ok=True)
+    safe = topic_dir.strip("/").replace("/", "_") or "root"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_path = join(log_dir, f"{safe}-{stamp}.log")
+    target = join(topic_dir, "topics")
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", dir=topic_dir, prefix=".topics-", delete=False
+    )
+    tmp_path = tmp.name
+    tmp.close()
+    code = -1
+    with open(log_path, "w", encoding="utf-8") as log:
+        log.write(f"vtt-topics {topic_dir}\nstarted {stamp}\n")
+        log.flush()
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as out:
+                code = subprocess.run(
+                    ["vtt-topics", topic_dir], stdout=out, stderr=log
+                ).returncode
+        except OSError as e:
+            log.write(f"error {e}\n")
+        log.write(f"exit={code}\n")
+    if code == 0 and exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+        os.replace(tmp_path, target)
+    elif exists(tmp_path):
+        os.remove(tmp_path)
+    return code
+
+
+def start_topics_generation(
+    root: str, filename: str, log_dir: str = TOPICS_LOG_DIR
+) -> str:
+    topic_dir = topics_dir_for(root, filename)
+    if not os.path.isdir(topic_dir):
+        return "not found"
+    key = os.path.realpath(topic_dir)
+    with _topics_lock:
+        if key in _topics_running:
+            return "already running"
+        _topics_running.add(key)
+
+    def worker():
+        try:
+            run_vtt_topics(topic_dir, log_dir)
+        finally:
+            with _topics_lock:
+                _topics_running.discard(key)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return "started"
+
+
+
     abs_vtt = join(root, vtt)
     rel_vtt = relpath(abs_vtt, root)
     if not exists(abs_vtt):
@@ -513,6 +584,13 @@ def topics(filename: str) -> Topics:
     """Return background-generated topic markers for a podcast"""
     results = read_topics(args.root, filename)
     return Topics(filename=filename, results=results, results_count=len(results))
+
+
+@app.post("/uttale/GenerateTopics", response_model=GenerateTopics)
+def generate_topics(request: GenerateTopicsRequest) -> GenerateTopics:
+    """Generate topic markers for an episode in the background (fire and forget)"""
+    status = start_topics_generation(args.root, request.filename)
+    return GenerateTopics(filename=request.filename, status=status)
 
 
 def get_audio_segment(

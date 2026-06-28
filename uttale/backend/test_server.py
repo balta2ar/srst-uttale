@@ -545,5 +545,20 @@ class TestProcessVtt(unittest.TestCase):
         self.assertEqual(rows, [])
 
 
+class TestPatternToFdRegex(unittest.TestCase):
+    def test_single_token(self):
+        self.assertEqual(server.pattern_to_fd_regex('idioti'), '(?i)idioti')
+
+    def test_multiple_tokens_in_order(self):
+        self.assertEqual(server.pattern_to_fd_regex('idioti 202606'), '(?i)idioti.*202606')
+
+    def test_escapes_regex_special_chars(self):
+        self.assertEqual(server.pattern_to_fd_regex('c++ a.b'), r'(?i)c\+\+.*a\.b')
+
+    def test_empty_and_whitespace_return_empty(self):
+        self.assertEqual(server.pattern_to_fd_regex(''), '')
+        self.assertEqual(server.pattern_to_fd_regex('   '), '')
+
+
 if __name__ == '__main__':
     unittest.main()

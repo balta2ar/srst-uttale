@@ -481,6 +481,13 @@ def pattern_to_wildcard(pattern: str) -> str:
     return wildcard.lower()
 
 
+def pattern_to_fd_regex(pattern: str) -> str:
+    parts = pattern.strip().split()
+    if not parts:
+        return ""
+    return "(?i)" + ".*".join(re.escape(p) for p in parts)
+
+
 def reindex(root: str, pattern: str = ""):
     try:
         fd = subprocess.run(

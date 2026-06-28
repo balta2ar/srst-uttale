@@ -597,6 +597,35 @@ class TestReindexWrite(unittest.TestCase):
         self.assertEqual(gone, 0)
         self.assertEqual(self.line_count(), 1)
 
+    def test_reindex_rolls_back_and_connection_survives_write_error(self):
+        server.db_duckdb.execute(
+            "INSERT INTO lines VALUES ('48k/keep/20200101/by10m/z.vtt','00:00:00.000','00:00:01.000','keep')")
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'), ['x'])
+        real = server.db_duckdb
+
+        class FailScopes:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *a, **k):
+                if "INSERT INTO scopes" in sql:
+                    raise RuntimeError("injected write failure")
+                return self._conn.execute(sql, *a, **k)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        server.db_duckdb = FailScopes(real)
+        try:
+            with self.assertRaises(RuntimeError):
+                server.reindex(self.root, 'idioti')
+        finally:
+            server.db_duckdb = real
+        kept = server.db_duckdb.execute(
+            "SELECT COUNT(*) FROM lines WHERE filename = '48k/keep/20200101/by10m/z.vtt'").fetchone()[0]
+        self.assertEqual(kept, 1)
+        self.assertEqual(self.line_count(), 1)
+
 
 class TestReindexEndpoint(unittest.TestCase):
     def setUp(self):

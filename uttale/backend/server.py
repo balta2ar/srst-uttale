@@ -585,6 +585,9 @@ def reindex(root: str, pattern: str = "", limit=None, files=None) -> int:
                 "INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope"
             )
         db_duckdb.commit()
+    except Exception:
+        db_duckdb.rollback()
+        raise
     finally:
         db_duckdb.unregister("df")
     return total_files

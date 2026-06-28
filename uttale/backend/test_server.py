@@ -674,5 +674,74 @@ class TestReindexWrite(unittest.TestCase):
         self.assertEqual(self.line_count(), 1)
 
 
+class TestReindexEndpoint(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.dbfile = os.path.join(tempfile.mkdtemp(), 'lines.db')
+        self._saved_args = server.args
+        self._saved_db = server.db_duckdb
+        server.args = SimpleNamespace(db=self.dbfile, root=self.root)
+        server.init_database()
+        with server._reindex_lock:
+            server._reindex_running = False
+
+    def tearDown(self):
+        try:
+            server.db_duckdb.close()
+        except Exception:
+            pass
+        server.args = self._saved_args
+        server.db_duckdb = self._saved_db
+        with server._reindex_lock:
+            server._reindex_running = False
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(self.dbfile), ignore_errors=True)
+
+    def make_vtt(self, rel):
+        p = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nx\n")
+        return rel
+
+    def test_empty_pattern_rejected(self):
+        res = server.start_reindex(self.root, '   ', server.REINDEX_LIMIT)
+        self.assertEqual(res['status'], 'no pattern')
+        self.assertEqual(res['matched'], 0)
+
+    def test_nothing_matched(self):
+        res = server.start_reindex(self.root, 'doesnotexist', server.REINDEX_LIMIT)
+        self.assertEqual(res['status'], 'nothing matched')
+        self.assertEqual(res['matched'], 0)
+
+    def test_started_reports_matched_and_runs(self):
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'))
+        res = server.start_reindex(self.root, 'idioti', server.REINDEX_LIMIT)
+        self.assertEqual(res['status'], 'started')
+        self.assertEqual(res['matched'], 1)
+        for _ in range(50):
+            with server._reindex_lock:
+                running = server._reindex_running
+            if not running:
+                break
+            time.sleep(0.1)
+        n = server.db_duckdb.execute("SELECT COUNT(*) FROM lines").fetchone()[0]
+        self.assertEqual(n, 1)
+
+    def test_truncated_flag_when_capped(self):
+        for i in range(3):
+            self.make_vtt(os.path.join('48k', 'idioti', '2026060%d' % i, 'by10m', 'a.vtt'))
+        res = server.start_reindex(self.root, 'idioti', 2)
+        self.assertEqual(res['matched'], 2)
+        self.assertTrue(res['truncated'])
+
+    def test_already_running_guard(self):
+        self.make_vtt(os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'))
+        with server._reindex_lock:
+            server._reindex_running = True
+        res = server.start_reindex(self.root, 'idioti', server.REINDEX_LIMIT)
+        self.assertEqual(res['status'], 'already running')
+
+
 if __name__ == '__main__':
     unittest.main()

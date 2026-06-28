@@ -52,6 +52,9 @@ class Play(BaseModel):
 class Reindex(BaseModel):
     pattern: str = ""
     status: str = ""
+    limit: int = 2000
+    matched: int = 0
+    truncated: bool = False
 
 
 class StatusResponse(BaseModel):
@@ -501,6 +504,37 @@ def discover_vtts(root: str, pattern: str = "", limit=None) -> list:
         return []
 
 
+REINDEX_LIMIT = 2000
+_reindex_lock = threading.Lock()
+_reindex_running = False
+
+
+def start_reindex(root: str, pattern: str, limit: int) -> dict:
+    global _reindex_running
+    if not pattern.strip():
+        return {"status": "no pattern", "matched": 0, "truncated": False}
+    vtt_files = discover_vtts(root, pattern, limit)
+    matched = len(vtt_files)
+    truncated = matched >= limit
+    if matched == 0:
+        return {"status": "nothing matched", "matched": 0, "truncated": False}
+    with _reindex_lock:
+        if _reindex_running:
+            return {"status": "already running", "matched": matched, "truncated": truncated}
+        _reindex_running = True
+
+    def worker():
+        global _reindex_running
+        try:
+            reindex(root, pattern, limit)
+        finally:
+            with _reindex_lock:
+                _reindex_running = False
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"status": "started", "matched": matched, "truncated": truncated}
+
+
 def reindex(root: str, pattern: str = "", limit=None) -> int:
     vtt_files = discover_vtts(root, pattern, limit)
     total_files = len(vtt_files)
@@ -751,12 +785,17 @@ def audio_endpoint(
 
 
 @app.post("/uttale/Reindex", response_model=Reindex)
-def trigger_reindex(request: Reindex, background_tasks: BackgroundTasks) -> Reindex:
-    """Trigger reindexing of subtitle files"""
-    result = Reindex(pattern=request.pattern)
-    background_tasks.add_task(reindex, args.root, request.pattern)
-    result.status = "Reindexing started in background"
-    return result
+def trigger_reindex(request: Reindex) -> Reindex:
+    """Reindex VTTs matching a filename pattern (per-file replace)"""
+    limit = request.limit if request.limit and request.limit > 0 else REINDEX_LIMIT
+    res = start_reindex(args.root, request.pattern, limit)
+    return Reindex(
+        pattern=request.pattern,
+        limit=limit,
+        status=res["status"],
+        matched=res["matched"],
+        truncated=res["truncated"],
+    )
 
 
 def favorites_db_path() -> str:

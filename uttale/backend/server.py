@@ -428,7 +428,7 @@ def start_topics_generation(
     return "started"
 
 
-
+def process_vtt(vtt: str, root: str) -> List[tuple]:
     abs_vtt = join(root, vtt)
     rel_vtt = relpath(abs_vtt, root)
     if not exists(abs_vtt):

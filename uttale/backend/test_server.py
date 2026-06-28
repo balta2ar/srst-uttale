@@ -517,5 +517,33 @@ class TestListens(unittest.TestCase):
         self.assertEqual(mode.lower(), 'wal')
 
 
+class TestProcessVtt(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.rel = os.path.join('48k', 'Pod', '20260623', 'by10m', 'by10m_00.vtt')
+        self.abs = os.path.join(self.root, self.rel)
+        os.makedirs(os.path.dirname(self.abs))
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def write_vtt(self, body):
+        with open(self.abs, 'w', encoding='utf-8') as f:
+            f.write(body)
+
+    def test_parses_captions_to_tuples(self):
+        self.write_vtt(
+            "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhei der\n\n"
+            "00:00:01.000 --> 00:00:02.500\nandre linje\n"
+        )
+        rows = server.process_vtt(self.rel, self.root)
+        self.assertEqual(rows[0], (self.rel, '00:00:00.000', '00:00:01.000', 'hei der'))
+        self.assertEqual(rows[1][3], 'andre linje')
+
+    def test_missing_file_returns_empty(self):
+        rows = server.process_vtt(os.path.join('48k', 'X', '20200101', 'a', 'b.vtt'), self.root)
+        self.assertEqual(rows, [])
+
+
 if __name__ == '__main__':
     unittest.main()

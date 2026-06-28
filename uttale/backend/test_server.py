@@ -610,6 +610,12 @@ class TestReindexEndpoint(unittest.TestCase):
             server._reindex_running = False
 
     def tearDown(self):
+        for _ in range(100):
+            with server._reindex_lock:
+                running = server._reindex_running
+            if not running:
+                break
+            time.sleep(0.05)
         try:
             server.db_duckdb.close()
         except Exception:

@@ -49,9 +49,38 @@ with `q.replace(" ", "%")` → `LIKE %idioti%202606%` (case-insensitive, tokens 
 order, substring on the path). The Reindex button reuses the **same string** as
 the `pattern`.
 
-A bare/empty pattern is **rejected** (`status: "no pattern"`). A full corpus
-rebuild remains a CLI-only operation (`--reindex` with no pattern); it is never
-reachable from the HTTP endpoint, removing the whole-table-wipe footgun.
+A bare/empty pattern is **rejected over HTTP** (`status: "no pattern"`). A full
+corpus rebuild remains a **CLI-only** operation (`--reindex` with no pattern); it
+is never reachable from the HTTP endpoint, removing the whole-table-wipe footgun
+from the network surface.
+
+## CLI (preserved)
+
+The existing `--reindex` flag (`server.py:889-897`) is kept and now shares the
+same matcher and write logic as the HTTP path:
+
+- `--reindex` (no arg, `const=""`) → **full rebuild**: whole-table wipe + reindex
+  the entire corpus (this is the only path that clears rows for files deleted from
+  disk). **No limit.**
+- `--reindex PATTERN` (e.g. `--reindex 2026`, `--reindex '202510 kontakt'`) →
+  **filtered, per-file replace** (safe; only matched files' rows are
+  deleted+reinserted, everything else untouched). **No limit.**
+
+So the CLI can still reindex everything *and* filter, unbounded; the HTTP endpoint
+is the limited, pattern-required surface.
+
+## One write rule everywhere
+
+The mode is chosen by **whether a pattern is present**, identically for CLI and
+HTTP:
+
+- **Non-empty pattern → per-file replace** (scoped `DELETE WHERE filename=?` +
+  `INSERT`; non-destructive to unmatched files).
+- **Empty pattern → full rebuild** (whole-table `DELETE FROM lines/scopes` +
+  reinsert everything; CLI-only, since HTTP rejects empty).
+
+The discovery matcher is the same in both surfaces (see next section); only the
+limit differs (CLI unbounded, HTTP default 2000).
 
 ## Pushing the filter into `fd`
 
@@ -75,29 +104,38 @@ not-yet-indexed files (verified: `fd` found 25 `idioti 202606` VTTs on disk whil
 `scopes` had 17 — the 8 extra are precisely what a reindex would add).
 
 New helper `pattern_to_fd_regex(pattern: str) -> str` (pure, unit-testable)
-performs the token split / escape / join.
+performs the token split / escape / join. Discovery is wrapped in a shared helper
+`discover_vtts(root, pattern, limit) -> list[str]` used by **both** the CLI and
+HTTP paths, so the matcher is identical. This **replaces** the legacy
+`pattern_to_wildcard` + Python `fnmatch` filtering (`server.py:473-498`); the old
+list-everything-then-`fnmatch` approach is removed.
 
 The `fd` invocation:
 
 ```
-fd --type f --extension vtt --base-directory <root> \
-   --full-path <regex> --max-results <limit>
+fd --type f --extension vtt --base-directory <root> --full-path <regex> [--max-results <limit>]
 ```
+
+When `pattern` is empty (CLI full rebuild), the regex is empty/omitted so `fd`
+lists every VTT. `--max-results` is included only when `limit` is set.
 
 ### Candidate limit
 
-`--max-results <limit>` bounds the candidate set (the "good limit" requested).
-Default **2000**, overridable via a `limit` field in the POST body. A targeted
-podcast+month query matches a handful of files; the limit is a guardrail against
-an over-broad query (e.g. `"2026"` matching thousands). When `fd` returns exactly
-`limit` results the response flags it (`truncated: true`) so the caller knows the
-window was capped.
+`--max-results <limit>` bounds the candidate set (the "good limit" requested) and
+applies to the **HTTP path only**: default **2000**, overridable via a `limit`
+field in the POST body. A targeted podcast+month query matches a handful of files;
+the limit is a guardrail against an over-broad query (e.g. `"2026"` matching
+thousands). When `fd` returns exactly `limit` results the response flags it
+(`truncated: true`) so the caller knows the set was capped.
+
+The **CLI is unbounded** (`limit=None` → no `--max-results`), so `--reindex` (full
+or filtered) always processes every match.
 
 ## Idempotent per-file replace (core)
 
-Replace the whole-table wipe with a **per-file replace**. After `fd` yields the
-matched relative paths and the workers parse them into rows, under the write lock,
-for each affected `filename`:
+This is the write path for a **non-empty pattern** (all HTTP calls, filtered CLI).
+After `fd` yields the matched relative paths and the workers parse them into rows,
+under the write lock, for each affected `filename`:
 
 1. `DELETE FROM lines WHERE filename = ?`
 2. `INSERT` that file's freshly-parsed rows (`filename, start, end_time, text`).
@@ -108,6 +146,11 @@ This guarantees:
   even though `lines` has no primary key.
 - **Edits are picked up** — a re-transcribed VTT refreshes its rows.
 - Files **not matched by the query are never touched**.
+
+The **empty-pattern full rebuild** (CLI-only) keeps the existing whole-table path:
+`DELETE FROM lines` / `DELETE FROM scopes` then reinsert everything `fd` returned
+(unbounded). Both paths share the same parse step; they differ only in the
+delete scope.
 
 ### Scopes reconciliation
 
@@ -211,27 +254,37 @@ In `uttale/backend/test_server.py`, using the existing temp-dir fixture style:
   regex-special chars escaped (`c++`, `a.b`), empty/whitespace → empty.
 - **`process_vtt` regression:** parse a temp VTT, assert the returned tuples
   `(filename, start, end_time, text)`.
-- **Idempotency:** build a temp `48k/Pod/<date>/by10m/x.vtt`, point
-  `server.args.root`/`server.args.db` at temp paths, run the query reindex twice,
-  assert `lines` row count is identical after the 2nd run (no duplication).
+- **`discover_vtts`:** in a temp tree, a pattern returns only matching relative
+  paths; an empty pattern returns all; a `limit` caps the count.
+- **Idempotency (per-file replace):** build a temp `48k/Pod/<date>/by10m/x.vtt`,
+  point `server.args.root`/`server.args.db` at temp paths, run a *pattern* reindex
+  twice, assert `lines` row count is identical after the 2nd run (no duplication).
 - **Edit refresh:** modify the VTT between runs, assert rows reflect the new
   content, not a mix of old+new.
 - **Scopes reconcile:** assert a newly indexed filename appears in `scopes`
   exactly once, and an unrelated existing scope row is untouched.
 - **Scoped (non-destructive) write:** seed `lines`/`scopes` with an unrelated
-  podcast, run a query reindex that doesn't match it, assert its rows survive
+  podcast, run a *pattern* reindex that doesn't match it, assert its rows survive
   (guards against the old whole-table wipe).
-- **Empty pattern:** assert `status == "no pattern"` and no DB change.
+- **CLI full rebuild (empty pattern):** seed an unrelated/stale `lines` row whose
+  file is absent from the temp tree, run the empty-pattern rebuild, assert the
+  stale row is gone and the on-disk files are present (whole-table rebuild
+  semantics, unbounded).
+- **HTTP empty pattern rejected:** assert the endpoint returns
+  `status == "no pattern"` and makes no DB change (distinct from the CLI rebuild).
 - New code must add **zero** new ruff issues. Verify via the uv test env
   (`uv venv` + duckdb/polars/uvicorn/webvtt-py/fastapi/pydantic/tqdm/httpx) and
   `make test`. Pre-existing ruff issues are out of scope.
 
 ## Files touched
 
-- `uttale/backend/server.py`: restore `process_vtt`; add `pattern_to_fd_regex`;
-  add the `fd --full-path` discovery; add the per-file replace + scopes-reconcile
-  write path; add `_reindex_lock` / `_reindex_running`; extend the `Reindex`
-  model and `POST /uttale/Reindex` (require pattern, `limit`, synchronous
+- `uttale/backend/server.py`: restore `process_vtt`; add `pattern_to_fd_regex`
+  and the shared `discover_vtts(root, pattern, limit)` (`fd --full-path`),
+  replacing the legacy `pattern_to_wildcard` + `fnmatch` path; add the per-file
+  replace + scopes-reconcile write path (non-empty pattern) alongside the
+  empty-pattern whole-table rebuild; add `_reindex_lock` / `_reindex_running`;
+  wire the CLI `--reindex` (unbounded) and extend the `Reindex` model +
+  `POST /uttale/Reindex` (require pattern, `limit` default 2000, synchronous
   discovery + threaded run + status/matched/truncated).
 - `uttale/backend/test_server.py`: the tests above.
 - `docs/specs/2026-06-28-incremental-reindex-design.md`: this document.

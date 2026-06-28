@@ -560,5 +560,37 @@ class TestPatternToFdRegex(unittest.TestCase):
         self.assertEqual(server.pattern_to_fd_regex('   '), '')
 
 
+class TestDiscoverVtts(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.made = []
+        for rel in [
+            os.path.join('48k', 'idioti', '20260601', 'by10m', 'a.vtt'),
+            os.path.join('48k', 'idioti', '20260601', 'by10m', 'b.vtt'),
+            os.path.join('48k', 'kontakt', '20260515', 'by10m', 'c.vtt'),
+        ]:
+            p = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, 'w', encoding='utf-8') as f:
+                f.write('WEBVTT\n')
+            self.made.append(rel)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_empty_pattern_lists_all(self):
+        found = server.discover_vtts(self.root, '')
+        self.assertEqual(sorted(found), sorted(self.made))
+
+    def test_pattern_filters(self):
+        found = server.discover_vtts(self.root, 'idioti 202606')
+        self.assertEqual(sorted(found),
+                         sorted(m for m in self.made if 'idioti' in m))
+
+    def test_limit_caps_count(self):
+        found = server.discover_vtts(self.root, 'idioti', limit=1)
+        self.assertEqual(len(found), 1)
+
+
 if __name__ == '__main__':
     unittest.main()

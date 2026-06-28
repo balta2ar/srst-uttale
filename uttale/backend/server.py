@@ -488,6 +488,20 @@ def pattern_to_fd_regex(pattern: str) -> str:
     return "(?i)" + ".*".join(re.escape(p) for p in parts)
 
 
+def discover_vtts(root: str, pattern: str = "", limit=None) -> list:
+    cmd = ["fd", "--type", "f", "--extension", "vtt", "--base-directory", root]
+    if limit is not None:
+        cmd += ["--max-results", str(limit)]
+    regex = pattern_to_fd_regex(pattern)
+    if regex:
+        cmd += ["--full-path", regex]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return out.stdout.splitlines()
+    except:
+        return []
+
+
 def reindex(root: str, pattern: str = ""):
     try:
         fd = subprocess.run(

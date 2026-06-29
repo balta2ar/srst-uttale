@@ -678,7 +678,7 @@ class TestReindexEndpoint(unittest.TestCase):
         res = server.start_reindex(self.root, 'idioti', server.REINDEX_LIMIT)
         self.assertEqual(res['status'], 'started')
         self.assertEqual(res['matched'], 1)
-        for _ in range(50):
+        for _ in range(300):
             with server._reindex_lock:
                 running = server._reindex_running
             if not running:

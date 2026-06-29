@@ -615,12 +615,18 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
     """Search for text in the database given a scope"""
     result = Search(q=q, scope=scope, limit=limit)
     try:
-        query = q.replace(" ", "%")
-        scope_query = scope.replace(" ", "%")
-        cursor = db_duckdb.execute(
-            "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
-            (f"%{query}%", f"%{scope_query}%", limit),
-        ).fetchall()
+        if not q.strip() and scope:
+            cursor = db_duckdb.execute(
+                "SELECT filename, start, end_time, text FROM lines WHERE filename = ? ORDER BY start LIMIT ?",
+                (scope, limit),
+            ).fetchall()
+        else:
+            query = q.replace(" ", "%")
+            scope_query = scope.replace(" ", "%")
+            cursor = db_duckdb.execute(
+                "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
+                (f"%{query}%", f"%{scope_query}%", limit),
+            ).fetchall()
         result.results = [
             {"filename": row[0], "text": row[3], "start": row[1], "end": row[2]}
             for row in cursor

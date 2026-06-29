@@ -709,5 +709,57 @@ class TestReindexEndpoint(unittest.TestCase):
         self.assertEqual(cnt, 1)
 
 
+class TestSearchExactMatch(unittest.TestCase):
+    def setUp(self):
+        self.dbfile = os.path.join(tempfile.mkdtemp(), 'lines.db')
+        self._saved_args = server.args
+        self._saved_db = server.db_duckdb
+        server.args = SimpleNamespace(db=self.dbfile)
+        server.init_database()
+        rows = [
+            # file A, inserted OUT of start order on purpose
+            ('48k/Pod/20260601/by10m/a.vtt', '00:00:02.000', '00:00:03.000', 'a-third'),
+            ('48k/Pod/20260601/by10m/a.vtt', '00:00:00.000', '00:00:01.000', 'a-first'),
+            ('48k/Pod/20260601/by10m/a.vtt', '00:00:01.000', '00:00:02.000', 'a-second'),
+            # file B (must never appear for an A-scoped exact match)
+            ('48k/Pod/20260601/by10m/b.vtt', '00:00:00.000', '00:00:01.000', 'b-only'),
+        ]
+        server.db_duckdb.executemany("INSERT INTO lines VALUES (?, ?, ?, ?)", rows)
+
+    def tearDown(self):
+        try:
+            server.db_duckdb.close()
+        except Exception:
+            pass
+        server.args = self._saved_args
+        server.db_duckdb = self._saved_db
+        shutil.rmtree(os.path.dirname(self.dbfile), ignore_errors=True)
+
+    def test_exact_match_returns_only_that_file_ordered_by_start(self):
+        res = server.search(q="", scope="48k/Pod/20260601/by10m/a.vtt", limit=1000)
+        files = {r["filename"] for r in res.results}
+        self.assertEqual(files, {"48k/Pod/20260601/by10m/a.vtt"})
+        self.assertEqual([r["text"] for r in res.results], ["a-first", "a-second", "a-third"])
+        self.assertEqual(res.results_count, 3)
+
+    def test_whitespace_only_q_still_uses_exact_match(self):
+        res = server.search(q="   ", scope="48k/Pod/20260601/by10m/a.vtt", limit=1000)
+        self.assertEqual(res.results_count, 3)
+        self.assertNotIn("b-only", [r["text"] for r in res.results])
+
+    def test_empty_scope_uses_like_path_matches_all(self):
+        res = server.search(q="", scope="", limit=1000)
+        self.assertEqual(res.results_count, 4)
+
+    def test_text_query_still_uses_like_path(self):
+        res = server.search(q="a-second", scope="", limit=1000)
+        self.assertEqual([r["text"] for r in res.results], ["a-second"])
+
+    def test_exact_match_limit_applies(self):
+        res = server.search(q="", scope="48k/Pod/20260601/by10m/a.vtt", limit=2)
+        self.assertEqual(res.results_count, 2)
+        self.assertEqual([r["text"] for r in res.results], ["a-first", "a-second"])
+
+
 if __name__ == '__main__':
     unittest.main()

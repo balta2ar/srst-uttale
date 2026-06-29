@@ -341,6 +341,7 @@ class TestGenerateTopics(unittest.TestCase):
         self.assertIn('vtt-topics start', out)
         self.assertIn('vtt-topics published', out)
         self.assertIn(self.episode_dir, out)
+        self.assertFalse(any('vtt-topics failed' in r.getMessage() for r in cm.records))
 
     def test_logs_error_on_nonzero_exit(self):
         self.stub('#!/bin/sh\necho boom >&2\nexit 3\n')
@@ -363,8 +364,11 @@ class TestGenerateTopics(unittest.TestCase):
         with self.assertLogs(level='ERROR') as cm:
             run_vtt_topics(self.episode_dir, log_dir=self.logs)
         out = "\n".join(cm.output)
-        self.assertIn('vtt-topics', out)
+        self.assertIn('not found', out)
         self.assertIn(self.episode_dir, out)
+        msgs = [r.getMessage() for r in cm.records]
+        self.assertEqual(sum('vtt-topics failed' in m for m in msgs), 1)
+        self.assertFalse(any('published' in m for m in msgs))
 
     def test_start_returns_not_found_for_missing_dir(self):
         missing = os.path.join('48k', 'Nope', '20260101', 'by10m', 'x_00.vtt')

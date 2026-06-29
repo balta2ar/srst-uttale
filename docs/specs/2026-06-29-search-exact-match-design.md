@@ -60,6 +60,19 @@ lexically = chronologically; the 10-minute buckets never exceed the `HH` field).
   never enters the branch; full-text search behavior is unchanged.
 - Empirically: same rows, same order, ~17× faster.
 
+### Contract narrowing (the one behavioral change)
+
+For the `q=""` + `scope` case, `scope` is now treated as an **exact full
+filename**: a *partial/substring* scope that previously substring-matched (and
+could even surface lines from a different file whose path contained the substring)
+now returns `[]`. This is safe because **every** `q=""` caller passes a full VTT
+path — verified across the offline `/api/lines` proxy and the harken call sites.
+A future caller that passes a partial scope with empty `q` would get `[]`; if that
+is ever needed, send a non-empty `q` (e.g. `q="*"`-style is not supported — use
+the search box semantics) or add an explicit partial-scope path. The exact match
+is also strictly *more correct* for the download use (no accidental cross-file
+substring hits).
+
 ## Data flow (callers unchanged)
 
 `downloadEpisode` → `Api.lines(vtt)` → `/api/lines` (offline proxy: `q=""`,

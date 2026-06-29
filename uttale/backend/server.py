@@ -388,7 +388,9 @@ def run_vtt_topics(topic_dir: str, log_dir: str = TOPICS_LOG_DIR) -> int:
     )
     tmp_path = tmp.name
     tmp.close()
+    logging.info("vtt-topics start dir=%s log=%s", topic_dir, log_path)
     code = -1
+    err = ""
     with open(log_path, "w", encoding="utf-8") as log:
         log.write(f"vtt-topics {topic_dir}\nstarted {stamp}\n")
         log.flush()
@@ -398,12 +400,22 @@ def run_vtt_topics(topic_dir: str, log_dir: str = TOPICS_LOG_DIR) -> int:
                     ["vtt-topics", topic_dir], stdout=out, stderr=log
                 ).returncode
         except OSError as e:
+            err = str(e)
             log.write(f"error {e}\n")
         log.write(f"exit={code}\n")
     if code == 0 and exists(tmp_path) and os.path.getsize(tmp_path) > 0:
         os.replace(tmp_path, target)
-    elif exists(tmp_path):
-        os.remove(tmp_path)
+        logging.info("vtt-topics published dir=%s", topic_dir)
+    else:
+        if exists(tmp_path):
+            os.remove(tmp_path)
+        if err:
+            reason = f"vtt-topics not found: {err}"
+        elif code != 0:
+            reason = f"exit={code}"
+        else:
+            reason = "produced no output"
+        logging.error("vtt-topics failed (%s) dir=%s log=%s", reason, topic_dir, log_path)
     return code
 
 

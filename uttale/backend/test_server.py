@@ -333,6 +333,39 @@ class TestGenerateTopics(unittest.TestCase):
         run_vtt_topics(self.episode_dir, log_dir=self.logs)
         self.assertFalse(os.path.exists(self.topics_path))
 
+    def test_logs_start_and_published_on_success(self):
+        self.stub('#!/bin/sh\nprintf "00:00:10 Intro\\n"\n')
+        with self.assertLogs(level='INFO') as cm:
+            run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        out = "\n".join(cm.output)
+        self.assertIn('vtt-topics start', out)
+        self.assertIn('vtt-topics published', out)
+        self.assertIn(self.episode_dir, out)
+
+    def test_logs_error_on_nonzero_exit(self):
+        self.stub('#!/bin/sh\necho boom >&2\nexit 3\n')
+        with self.assertLogs(level='ERROR') as cm:
+            run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        out = "\n".join(cm.output)
+        self.assertIn('exit=3', out)
+        self.assertIn(self.logs, out)
+
+    def test_logs_error_on_empty_output(self):
+        self.stub('#!/bin/sh\nexit 0\n')
+        with self.assertLogs(level='ERROR') as cm:
+            run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        out = "\n".join(cm.output)
+        self.assertIn('no output', out)
+
+    def test_logs_error_when_binary_not_found(self):
+        # Do NOT stub vtt-topics; ensure PATH cannot resolve it.
+        os.environ['PATH'] = self.bindir
+        with self.assertLogs(level='ERROR') as cm:
+            run_vtt_topics(self.episode_dir, log_dir=self.logs)
+        out = "\n".join(cm.output)
+        self.assertIn('vtt-topics', out)
+        self.assertIn(self.episode_dir, out)
+
     def test_start_returns_not_found_for_missing_dir(self):
         missing = os.path.join('48k', 'Nope', '20260101', 'by10m', 'x_00.vtt')
         self.assertEqual(start_topics_generation(self.root, missing), 'not found')

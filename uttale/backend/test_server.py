@@ -877,5 +877,56 @@ class TestSearchExactMatch(unittest.TestCase):
         self.assertEqual([r["text"] for r in res.results], ["a-first", "a-second"])
 
 
+class TestConcurrentQueries(unittest.TestCase):
+    def setUp(self):
+        self.dbfile = os.path.join(tempfile.mkdtemp(), 'lines.db')
+        self._saved_args = server.args
+        self._saved_db = server.db_duckdb
+        server.args = SimpleNamespace(db=self.dbfile)
+        server.init_database()
+        rows = [(f'48k/Pod/2026070{i % 10}/by10m/a.vtt', f'00:00:{i % 60:02d}.000',
+                 '00:00:01.000', f'line {i}') for i in range(3000)]
+        server.db_duckdb.executemany("INSERT INTO lines VALUES (?, ?, ?, ?)", rows)
+        server.db_duckdb.executemany("INSERT INTO scopes VALUES (?)", [(r[0],) for r in rows])
+
+    def tearDown(self):
+        try:
+            server.db_duckdb.close()
+        except Exception:
+            pass
+        server.args = self._saved_args
+        server.db_duckdb = self._saved_db
+        shutil.rmtree(os.path.dirname(self.dbfile), ignore_errors=True)
+
+    def test_concurrent_scopes_and_search_do_not_cross_contaminate(self):
+        stop = threading.Event()
+        errors = []
+        reads = [0]
+
+        def worker():
+            while not stop.is_set():
+                try:
+                    server.scopes(q='Pod 202607', limit=50)
+                    res = server.search(q='', scope='Pod 20260705', limit=50)
+                    for r in res.results:
+                        assert set(r) == {'filename', 'text', 'start', 'end'}
+                except Exception as e:
+                    errors.append(repr(e))
+                reads[0] += 1
+
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(8)]
+        for t in threads:
+            t.start()
+        deadline = time.time() + 6
+        while time.time() < deadline and not errors and reads[0] < 4000:
+            time.sleep(0.02)
+        stop.set()
+        for t in threads:
+            t.join(timeout=2)
+
+        self.assertGreater(reads[0], 0, "workers never ran; concurrency not exercised")
+        self.assertEqual(errors, [], f"concurrent queries failed ({len(errors)}): {errors[:1]}")
+
+
 if __name__ == '__main__':
     unittest.main()

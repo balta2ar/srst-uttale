@@ -185,6 +185,14 @@ def init_database():
     db_duckdb.execute("CREATE TABLE IF NOT EXISTS scopes (scope VARCHAR)")
 
 
+def db_query(sql, params=()):
+    cursor = db_duckdb.cursor()
+    try:
+        return cursor.execute(sql, params).fetchall()
+    finally:
+        cursor.close()
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -613,14 +621,14 @@ def scopes(q: str = "", limit: int = 100) -> Scopes:
     result = Scopes(q=q, limit=limit)
     try:
         query = q.replace(" ", "%")
-        cursor = db_duckdb.execute(
+        rows = db_query(
             "SELECT DISTINCT scope FROM scopes WHERE LOWER(scope) LIKE LOWER(?) ORDER BY scope LIMIT ?",
             (f"%{query}%", limit),
-        ).fetchall()
-        result.results = [row[0] for row in cursor]
+        )
+        result.results = [row[0] for row in rows]
         result.results_count = len(result.results)
-    except:
-        pass
+    except Exception:
+        logging.exception("Scopes query failed")
     return result
 
 
@@ -630,23 +638,24 @@ def search(q: str, scope: str = "", limit: int = 100) -> Search:
     result = Search(q=q, scope=scope, limit=limit)
     try:
         if not q.strip() and scope:
-            cursor = db_duckdb.execute(
+            rows = db_query(
                 "SELECT filename, start, end_time, text FROM lines WHERE filename = ? ORDER BY start LIMIT ?",
                 (scope, limit),
-            ).fetchall()
+            )
         else:
             query = q.replace(" ", "%")
             scope_query = scope.replace(" ", "%")
-            cursor = db_duckdb.execute(
+            rows = db_query(
                 "SELECT filename, start, end_time, text FROM lines WHERE LOWER(text) LIKE LOWER(?) AND LOWER(filename) LIKE LOWER(?) LIMIT ?",
                 (f"%{query}%", f"%{scope_query}%", limit),
-            ).fetchall()
+            )
         result.results = [
             {"filename": row[0], "text": row[3], "start": row[1], "end": row[2]}
-            for row in cursor
+            for row in rows
         ]
         result.results_count = len(result.results)
-    except:
+    except Exception:
+        logging.exception("Search query failed")
         raise HTTPException(status_code=500, detail="DuckDB search query failed")
     return result
 

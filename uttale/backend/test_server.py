@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -649,6 +650,9 @@ class TestReindexWrite(unittest.TestCase):
                     raise RuntimeError("injected write failure")
                 return self._conn.execute(sql, *a, **k)
 
+            def cursor(self):
+                return FailScopes(self._conn.cursor())
+
             def __getattr__(self, name):
                 return getattr(self._conn, name)
 
@@ -662,6 +666,81 @@ class TestReindexWrite(unittest.TestCase):
             "SELECT COUNT(*) FROM lines WHERE filename = '48k/keep/20200101/by10m/z.vtt'").fetchone()[0]
         self.assertEqual(kept, 1)
         self.assertEqual(self.line_count(), 1)
+
+
+class TestReindexConcurrentReads(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.dbfile = os.path.join(tempfile.mkdtemp(), 'lines.db')
+        self._saved_args = server.args
+        self._saved_db = server.db_duckdb
+        server.args = SimpleNamespace(db=self.dbfile, root=self.root)
+        server.init_database()
+
+    def tearDown(self):
+        try:
+            server.db_duckdb.close()
+        except Exception:
+            pass
+        server.args = self._saved_args
+        server.db_duckdb = self._saved_db
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(os.path.dirname(self.dbfile), ignore_errors=True)
+
+    def make_vtt(self, rel, n):
+        p = os.path.join(self.root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        body = "WEBVTT\n\n"
+        for i in range(n):
+            s = f"{i // 3600:02d}:{(i // 60) % 60:02d}:{i % 60:02d}.000"
+            e = f"{(i + 1) // 3600:02d}:{((i + 1) // 60) % 60:02d}:{(i + 1) % 60:02d}.000"
+            body += f"{s} --> {e}\nline {i}\n\n"
+        with open(p, 'w', encoding='utf-8') as f:
+            f.write(body)
+        return rel
+
+    def test_reindex_persists_with_concurrent_readers(self):
+        self.make_vtt(os.path.join('48k', 'Pod', '20260705', 'by10m', 'a.vtt'), 500)
+        stop = threading.Event()
+        reads = [0]
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    server.scopes(q='Pod 202607', limit=50)
+                    server.search(q='', scope='Pod 20260705', limit=50)
+                    reads[0] += 1
+                except Exception:
+                    pass
+
+        result = {}
+
+        def do_reindex():
+            try:
+                result['n'] = server.reindex(self.root, 'Pod 202607')
+            except Exception as e:
+                result['error'] = repr(e)
+
+        readers = [threading.Thread(target=reader, daemon=True) for _ in range(4)]
+        for r in readers:
+            r.start()
+        t_index = threading.Thread(target=do_reindex, daemon=True)
+        t_index.start()
+        t_index.join(timeout=30)
+        stop.set()
+        for r in readers:
+            r.join(timeout=2)
+
+        self.assertFalse(t_index.is_alive(), "reindex deadlocked under concurrent reads")
+        self.assertGreater(reads[0], 0, "readers never ran; concurrency not exercised")
+        self.assertNotIn('error', result, f"reindex raised: {result.get('error')}")
+        self.assertEqual(result.get('n'), 1)
+        rows = server.db_duckdb.execute(
+            "SELECT COUNT(*) FROM scopes WHERE scope LIKE '48k/Pod/20260705/%'").fetchone()[0]
+        self.assertEqual(rows, 1, "reindexed scope not visible after concurrent-read reindex")
+        lines = server.db_duckdb.execute(
+            "SELECT COUNT(*) FROM lines WHERE filename LIKE '48k/Pod/20260705/%'").fetchone()[0]
+        self.assertEqual(lines, 500)
 
 
 class TestReindexEndpoint(unittest.TestCase):

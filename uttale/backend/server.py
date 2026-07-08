@@ -571,37 +571,39 @@ def reindex(root: str, pattern: str = "", limit=None, files=None) -> int:
     for idx in range(len(chunks)):
         all_rows.extend(return_dict.get(idx, []))
     df = pl.DataFrame(all_rows, schema=["filename", "start", "end_time", "text"])
-    db_duckdb.register("df", df)
-    db_duckdb.begin()
+    write = db_duckdb.cursor()
+    write.register("df", df)
+    write.begin()
     try:
         if pattern:
-            db_duckdb.execute(
+            write.execute(
                 "DELETE FROM lines WHERE filename IN (SELECT DISTINCT filename FROM df)"
             )
-            db_duckdb.execute(
+            write.execute(
                 "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
             )
-            db_duckdb.execute(
+            write.execute(
                 "DELETE FROM scopes WHERE scope IN (SELECT DISTINCT filename FROM df)"
             )
-            db_duckdb.execute(
+            write.execute(
                 "INSERT INTO scopes SELECT DISTINCT filename FROM df WHERE filename IN (SELECT DISTINCT filename FROM lines)"
             )
         else:
-            db_duckdb.execute("DELETE FROM lines")
-            db_duckdb.execute(
+            write.execute("DELETE FROM lines")
+            write.execute(
                 "INSERT INTO lines SELECT filename, start, end_time, text FROM df"
             )
-            db_duckdb.execute("DELETE FROM scopes")
-            db_duckdb.execute(
+            write.execute("DELETE FROM scopes")
+            write.execute(
                 "INSERT INTO scopes SELECT DISTINCT filename AS scope FROM lines ORDER BY scope"
             )
-        db_duckdb.commit()
+        write.commit()
     except Exception:
-        db_duckdb.rollback()
+        write.rollback()
         raise
     finally:
-        db_duckdb.unregister("df")
+        write.unregister("df")
+        write.close()
     return total_files
 
 
